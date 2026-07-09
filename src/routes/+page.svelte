@@ -13,8 +13,8 @@
 
 	let submitting = $state(false);
 	let selectedEmployee = $state('');
-	let tasks = $state<Array<{ text: string; status: 'To-Do' | 'In-Progress' | 'Done' | 'Obstacle'; hours: number; priority: 'Low' | 'Medium' | 'High' }>>([
-		{ text: '', status: 'Done', hours: 1, priority: 'Medium' }
+	let tasks = $state<Array<{ text: string; status: 'Done' | 'Obstacle' | 'Carry Over'; hours: number; priority: 'Low' | 'Medium' | 'High'; project: string }>>([
+		{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '' }
 	]);
 	let wellness = $state<'Good' | 'Tired' | 'Blocked'>('Good');
 	let notes = $state('');
@@ -28,7 +28,7 @@
 	let statusFilter = $state('All');
 
 	function addTask() {
-		tasks.push({ text: '', status: 'Done', hours: 1, priority: 'Medium' });
+		tasks.push({ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '' });
 	}
 
 	function removeTask(index: number) {
@@ -101,7 +101,8 @@
 				text: msg,
 				status: 'Done' as const,
 				hours: 1,
-				priority: 'Medium' as const
+				priority: 'Medium' as const,
+				project: ''
 			}));
 			if (newTasks.length > 0) {
 				tasks.splice(index + 1, 0, ...newTasks);
@@ -123,7 +124,8 @@
 				text: msg,
 				status: 'Done' as const,
 				hours: 1,
-				priority: 'Medium' as const
+				priority: 'Medium' as const,
+				project: ''
 			}));
 		}
 	}
@@ -175,13 +177,13 @@
 				notes = report.notes || '';
 				attachmentName = report.attachment || '';
 			} else {
-				tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium' }];
+				tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '' }];
 				wellness = 'Good';
 				notes = '';
 				attachmentName = '';
 			}
 		} else {
-			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium' }];
+			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '' }];
 			wellness = 'Good';
 			notes = '';
 			attachmentName = '';
@@ -190,7 +192,7 @@
 
 	$effect(() => {
 		if (form?.success) {
-			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium' }];
+			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '' }];
 			selectedEmployee = '';
 			lastLoadedEmployee = ''; // reset guard so the same employee can reload fresh data next time
 			wellness = 'Good';
@@ -252,7 +254,8 @@
 			const matchesSearch =
 				employee.toLowerCase().includes(searchQuery.toLowerCase()) ||
 				(report?.tasks || []).some((t: any) =>
-					t.text.toLowerCase().includes(searchQuery.toLowerCase())
+					t.text.toLowerCase().includes(searchQuery.toLowerCase()) ||
+					(t.project || '').toLowerCase().includes(searchQuery.toLowerCase())
 				);
 
 			// Match Status Filter
@@ -265,10 +268,9 @@
 	);
 
 	const statusConfig = {
-		'To-Do': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-[#1a1a1a] text-white border-[#1a1a1a] shadow-md', icon: 'schedule', text: 'To-Do' },
-		'In-Progress': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-[#1a1a1a] text-white border-[#1a1a1a] shadow-md', icon: 'sync', text: 'In Progress' },
 		'Done': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-[#1a1a1a] text-white border-[#1a1a1a] shadow-md', icon: 'check_circle', text: 'Done' },
-		'Obstacle': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-red-500 text-white border-red-500 shadow-md', icon: 'warning', text: 'Obstacle' }
+		'Obstacle': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-red-500 text-white border-red-500 shadow-md', icon: 'warning', text: 'Obstacle' },
+		'Carry Over': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-amber-500 text-white border-amber-500 shadow-md', icon: 'forward', text: 'Carry Over' }
 	};
 
 	// Ticket link parser (Jira and GitHub)
@@ -505,10 +507,21 @@
 									placeholder="Enter task description (paste git log to auto-split)..."
 								></textarea>
 
-								<!-- Hours & Priority Inputs -->
-								<div class="grid grid-cols-2 gap-3 sm:gap-4">
+								<!-- Project, Duration, and Priority Inputs -->
+								<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
 									<div class="space-y-1.5">
-										<span class="block text-xs font-semibold text-gray-500">Duration (Hours Spent)</span>
+										<span class="block text-xs font-semibold text-gray-500">Project</span>
+										<input
+											id="task-project-{index}"
+											type="text"
+											bind:value={task.project}
+											placeholder="e.g. AWBS, Internal"
+											required
+											class="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 focus:border-gray-900 outline-none transition-all shadow-sm"
+										/>
+									</div>
+									<div class="space-y-1.5">
+										<span class="block text-xs font-semibold text-gray-500">Duration (Hours)</span>
 										<input
 											id="task-hours-{index}"
 											type="number"
@@ -528,9 +541,9 @@
 											required
 											class="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 focus:border-gray-900 outline-none transition-all shadow-sm cursor-pointer"
 										>
-											<option value="Low">🟢 Low</option>
-											<option value="Medium">🟡 Medium</option>
-											<option value="High">🔴 High</option>
+											<option value="Low">Low</option>
+											<option value="Medium">Medium</option>
+											<option value="High">High</option>
 										</select>
 									</div>
 								</div>
@@ -646,7 +659,7 @@
 						/>
 					</div>
 					<div class="flex gap-1.5 overflow-x-auto scrollbar-hide">
-						{#each ['All', 'Done', 'In-Progress', 'To-Do', 'Obstacle'] as filter}
+						{#each ['All', 'Done', 'Obstacle', 'Carry Over'] as filter}
 							<button
 								type="button"
 								onclick={() => statusFilter = filter}
@@ -708,6 +721,11 @@
 														</span>
 														
 														<div class="flex items-center gap-1">
+															{#if item.project}
+																<span class="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-extrabold uppercase bg-blue-50 text-blue-700 border border-blue-200 text-center whitespace-nowrap">
+																	📁 {item.project}
+																</span>
+															{/if}
 															<span class="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-extrabold uppercase border text-center whitespace-nowrap"
 																class:bg-red-50={item.priority === 'High'} class:text-red-700={item.priority === 'High'} class:border-red-200={item.priority === 'High'}
 																class:bg-yellow-50={item.priority === 'Medium'} class:text-yellow-700={item.priority === 'Medium'} class:border-yellow-200={item.priority === 'Medium'}
