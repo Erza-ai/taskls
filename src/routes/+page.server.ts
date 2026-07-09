@@ -1,36 +1,44 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+import fs from 'fs/promises';
+import path from 'path';
 import {
 	getStore,
 	saveReport,
 	checkAndSendToDiscord,
 	getEmployeesList,
-	formatIndonesianDate
+	formatIndonesianDate,
+	getTodayDateString,
+	pokePendingEmployees
 } from '$lib/server/store';
 
 export const load: PageServerLoad = async () => {
 	const store = await getStore();
 	const employees = getEmployeesList();
+	const today = getTodayDateString();
 
 	return {
 		employees,
 		submissions: store.submissions,
 		discordSent: store.discordSent,
-		todayDate: store.date,
-		todayDateFormatted: formatIndonesianDate(store.date)
+		todayDate: today,
+		todayDateFormatted: formatIndonesianDate(today)
 	};
 };
 
 export const actions: Actions = {
-	default: async ({ request }) => {
+	submitReport: async ({ request }) => {
 		const data = await request.formData();
 		const employeeName = data.get('employeeName')?.toString().trim();
 		const tasksStr = data.get('tasks')?.toString();
+		const wellness = (data.get('wellness')?.toString() || 'Good') as 'Good' | 'Tired' | 'Blocked';
+		const notes = data.get('notes')?.toString() || '';
+		const attachment = data.get('attachment')?.toString().trim() || '';
 
 		// Validation
 		if (!employeeName) {
 			return fail(400, {
-				error: 'Nama karyawan harus dipilih.',
+				error: 'Employee name must be selected.',
 				values: { employeeName }
 			});
 		}
@@ -38,50 +46,62 @@ export const actions: Actions = {
 		const employees = getEmployeesList();
 		if (!employees.includes(employeeName)) {
 			return fail(400, {
-				error: 'Nama karyawan tidak terdaftar.',
+				error: 'Employee name is not registered.',
 				values: { employeeName }
 			});
 		}
 
-		let tasks: Array<{ text: string; status: string }> = [];
+		let tasks: Array<{ text: string; status: 'To-Do' | 'In-Progress' | 'Done' | 'Obstacle'; hours: number; priority: 'Low' | 'Medium' | 'High' }> = [];
 		try {
 			if (tasksStr) {
 				tasks = JSON.parse(tasksStr);
 			}
 		} catch (e) {
 			return fail(400, {
-				error: 'Format data task tidak valid.',
+				error: 'Task data format is invalid.',
 				values: { employeeName }
 			});
 		}
 
 		if (!Array.isArray(tasks) || tasks.length === 0) {
 			return fail(400, {
-				error: 'Task tidak boleh kosong.',
+				error: 'Tasks list cannot be empty.',
 				values: { employeeName }
 			});
 		}
 
 		const validStatuses = ['To-Do', 'In-Progress', 'Done', 'Obstacle'];
+		const validPriorities = ['Low', 'Medium', 'High'];
 		for (let i = 0; i < tasks.length; i++) {
 			const item = tasks[i];
 			if (!item.text || !item.text.trim()) {
 				return fail(400, {
-					error: `Deskripsi task #${i + 1} tidak boleh kosong.`,
+					error: `Task #${i + 1} description cannot be empty.`,
 					values: { employeeName }
 				});
 			}
 			if (!item.status || !validStatuses.includes(item.status)) {
 				return fail(400, {
-					error: `Status task #${i + 1} tidak valid.`,
+					error: `Task #${i + 1} status is invalid.`,
 					values: { employeeName }
 				});
+			}
+			// Parse & default hours
+			let parsedHours = parseFloat(item.hours as any);
+			if (isNaN(parsedHours) || parsedHours <= 0) {
+				parsedHours = 1;
+			}
+			item.hours = parsedHours;
+
+			// Validate & default priority
+			if (!item.priority || !validPriorities.includes(item.priority)) {
+				item.priority = 'Medium';
 			}
 		}
 
 		try {
 			// Save the report
-			await saveReport(employeeName, tasks as any);
+			await saveReport(employeeName, tasks as any, wellness, notes, attachment);
 
 			// Check if all employees have submitted today, send webhook asynchronously in background
 			checkAndSendToDiscord().catch((error) => {
@@ -90,13 +110,34 @@ export const actions: Actions = {
 
 			return {
 				success: true,
-				message: 'Laporan berhasil disimpan!'
+				message: 'Report successfully saved!'
 			};
 		} catch (error) {
 			console.error('Server error handling submission:', error);
 			return fail(500, {
-				error: 'Terjadi kesalahan server internal. Silakan coba lagi.',
+				error: 'Internal server error occurred. Please try again.',
 				values: { employeeName }
+			});
+		}
+	},
+
+	pokePending: async () => {
+		try {
+			const poked = await pokePendingEmployees();
+			if (poked) {
+				return {
+					success: true,
+					message: 'Reminder successfully sent to Discord!'
+				};
+			} else {
+				return fail(400, {
+					error: 'Failed to send reminder (perhaps all employees have already submitted today).'
+				});
+			}
+		} catch (error) {
+			console.error('Server error handling Poke Pending:', error);
+			return fail(500, {
+				error: 'Internal server error occurred while sending reminder.'
 			});
 		}
 	}
