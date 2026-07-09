@@ -132,14 +132,25 @@ export async function appendReportToSheets(
 			return;
 		}
 
-		const keyFile = path.join(path.resolve('data'), 'google-key.json');
 		let credentials;
-		try {
-			const keyContent = await fs.readFile(keyFile, 'utf-8');
-			credentials = JSON.parse(keyContent);
-		} catch (err) {
-			console.warn('Google service account key file not found or invalid. Skipping Google Sheets logging.');
-			return;
+		const envKey = env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+		if (envKey) {
+			try {
+				credentials = JSON.parse(envKey.trim());
+			} catch (err) {
+				console.error('Invalid GOOGLE_SERVICE_ACCOUNT_KEY JSON string:', err);
+			}
+		}
+
+		if (!credentials) {
+			const keyFile = path.join(path.resolve('data'), 'google-key.json');
+			try {
+				const keyContent = await fs.readFile(keyFile, 'utf-8');
+				credentials = JSON.parse(keyContent);
+			} catch (err) {
+				console.warn('Google service account credentials not found (checked GOOGLE_SERVICE_ACCOUNT_KEY env var and data/google-key.json). Skipping Google Sheets logging.');
+				return;
+			}
 		}
 
 		const auth = new google.auth.GoogleAuth({
