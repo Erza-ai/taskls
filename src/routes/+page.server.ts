@@ -32,8 +32,6 @@ export const actions: Actions = {
 		const employeeName = data.get('employeeName')?.toString().trim();
 		const tasksStr = data.get('tasks')?.toString();
 		const wellness = (data.get('wellness')?.toString() || 'Good') as 'Good' | 'Tired' | 'Blocked';
-		const notes = data.get('notes')?.toString() || '';
-		const attachment = data.get('attachment')?.toString().trim() || '';
 
 		// Validation
 		if (!employeeName) {
@@ -104,11 +102,15 @@ export const actions: Actions = {
 			} else {
 				item.project = item.project.trim();
 			}
+
+			// Sanitize task notes & attachment
+			item.notes = item.notes?.trim() || '';
+			item.attachment = item.attachment?.trim() || '';
 		}
 
 		try {
 			// Save the report
-			await saveReport(employeeName, tasks as any, wellness, notes, attachment);
+			await saveReport(employeeName, tasks as any, wellness);
 
 			// Check if all employees have submitted today, send webhook asynchronously in background
 			checkAndSendToDiscord().catch((error) => {

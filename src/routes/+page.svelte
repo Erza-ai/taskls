@@ -13,12 +13,18 @@
 
 	let submitting = $state(false);
 	let selectedEmployee = $state('');
-	let tasks = $state<Array<{ text: string; status: 'Done' | 'Obstacle' | 'Carry Over'; hours: number; priority: 'Low' | 'Medium' | 'High'; project: string }>>([
-		{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '' }
+	let tasks = $state<Array<{
+		text: string;
+		status: 'Done' | 'Obstacle' | 'Carry Over';
+		hours: number;
+		priority: 'Low' | 'Medium' | 'High';
+		project: string;
+		notes: string;
+		attachment: string;
+	}>>([
+		{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' }
 	]);
 	let wellness = $state<'Good' | 'Tired' | 'Blocked'>('Good');
-	let notes = $state('');
-	let attachmentName = $state('');
 
 	// Active date tab selection (defaults to today)
 	let activeDate = $state(data.todayDate);
@@ -28,7 +34,7 @@
 	let statusFilter = $state('All');
 
 	function addTask() {
-		tasks.push({ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '' });
+		tasks.push({ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' });
 	}
 
 	function removeTask(index: number) {
@@ -102,7 +108,9 @@
 				status: 'Done' as const,
 				hours: 1,
 				priority: 'Medium' as const,
-				project: ''
+				project: '',
+				notes: '',
+				attachment: ''
 			}));
 			if (newTasks.length > 0) {
 				tasks.splice(index + 1, 0, ...newTasks);
@@ -125,7 +133,9 @@
 				status: 'Done' as const,
 				hours: 1,
 				priority: 'Medium' as const,
-				project: ''
+				project: '',
+				notes: '',
+				attachment: ''
 			}));
 		}
 	}
@@ -172,32 +182,28 @@
 		if (employee) {
 			const report = data.submissions[employee]?.[data.todayDate];
 			if (report) {
-				tasks = JSON.parse(JSON.stringify(report.tasks));
+				tasks = JSON.parse(JSON.stringify(report.tasks)).map((t: any) => ({
+					...t,
+					notes: t.notes || '',
+					attachment: t.attachment || ''
+				}));
 				wellness = report.wellness || 'Good';
-				notes = report.notes || '';
-				attachmentName = report.attachment || '';
 			} else {
-				tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '' }];
+				tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' }];
 				wellness = 'Good';
-				notes = '';
-				attachmentName = '';
 			}
 		} else {
-			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '' }];
+			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' }];
 			wellness = 'Good';
-			notes = '';
-			attachmentName = '';
 		}
 	});
 
 	$effect(() => {
 		if (form?.success) {
-			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '' }];
+			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' }];
 			selectedEmployee = '';
 			lastLoadedEmployee = ''; // reset guard so the same employee can reload fresh data next time
 			wellness = 'Good';
-			notes = '';
-			attachmentName = '';
 		}
 	});
 
@@ -560,35 +566,36 @@
 										{/each}
 									</div>
 								</RadioGroup.Root>
+
+								<!-- Task Notes & Attachment -->
+								<div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 pt-4 border-t border-gray-200">
+									<div class="space-y-1.5">
+										<span class="block text-xs font-semibold text-gray-500">Task Notes</span>
+										<input
+											id="task-notes-{index}"
+											type="text"
+											bind:value={task.notes}
+											placeholder="Add specific details, obstacle explanation, etc. (Optional)"
+											class="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 focus:border-gray-900 outline-none transition-all shadow-sm"
+										/>
+									</div>
+									<div class="space-y-1.5">
+										<span class="block text-xs font-semibold text-gray-500">Attachment Link</span>
+										<input
+											id="task-attachment-{index}"
+											type="url"
+											bind:value={task.attachment}
+											placeholder="e.g. Figma, Loom, PR URL (Optional)"
+											class="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 focus:border-gray-900 outline-none transition-all shadow-sm"
+										/>
+									</div>
+								</div>
 							</div>
 						{/each}
 					</div>
 				</div>
 
-				<!-- Notes Field -->
-				<div class="space-y-2.5">
-					<label for="notes-textarea" class="block text-sm font-semibold text-gray-700">General Notes</label>
-					<textarea
-						id="notes-textarea"
-						name="notes"
-						bind:value={notes}
-						class="w-full form-textarea bg-white border border-gray-200 rounded-xl p-4 text-sm font-medium text-gray-800 min-h-[80px] resize-y focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none transition-all placeholder:text-gray-400 shadow-sm"
-						placeholder="Add any additional daily notes or remarks here... (Optional)"
-					></textarea>
-				</div>
 
-				<!-- Attachment Link Field -->
-				<div class="space-y-2.5">
-					<span class="block text-sm font-semibold text-gray-700">Attachment Link (Figma/Loom/PR URL)</span>
-					<input
-						id="attachment-link"
-						type="url"
-						name="attachment"
-						bind:value={attachmentName}
-						placeholder="https://example.com/screenshot-or-link"
-						class="w-full form-input bg-white border border-gray-200 rounded-xl p-4 text-sm font-medium text-gray-800 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none transition-all placeholder:text-gray-400 shadow-sm"
-					/>
-				</div>
 
 				<!-- Submit Button -->
 				<button type="submit" disabled={submitting} class="w-full bg-[#1a1a1a] hover:bg-black text-white font-bold py-4 rounded-xl text-sm transition-all mt-2 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2.5 shadow-lg shadow-black/10 active:scale-[0.98]">
@@ -738,30 +745,31 @@
 															</span>
 														</div>
 													</div>
-													<span class="text-gray-800 leading-relaxed font-medium pt-0.5">
-														{@html formatTaskText(item.text)}
-													</span>
+													<div class="flex flex-col flex-1">
+														<span class="text-gray-800 leading-relaxed font-medium pt-0.5">
+															{@html formatTaskText(item.text)}
+														</span>
+														{#if item.notes || item.attachment}
+															<div class="mt-2 space-y-1.5 pl-3 border-l-2 border-gray-200">
+																{#if item.notes}
+																	<div class="text-[11px] sm:text-xs text-gray-500 font-medium leading-normal">
+																		<span class="text-gray-600 font-bold">Notes:</span> {item.notes}
+																	</div>
+																{/if}
+																{#if item.attachment}
+																	<div class="flex items-center gap-1.5 text-[11px] sm:text-xs text-blue-600 font-semibold">
+																		<span class="material-symbols-outlined text-[14px]">link</span>
+																		<a href={item.attachment} target="_blank" class="hover:underline truncate max-w-[200px] sm:max-w-xs">
+																			{item.attachment}
+										</a>
+																	</div>
+																{/if}
+															</div>
+														{/if}
+													</div>
 												</div>
 											{/each}
 										</div>
-
-										<!-- General Notes -->
-										{#if report.notes}
-											<div class="text-xs bg-gray-50 p-3 rounded-xl border border-gray-200 text-gray-600 leading-relaxed">
-												<strong class="text-gray-700">Notes:</strong> {report.notes}
-											</div>
-										{/if}
-
-										<!-- Attachment Link -->
-										{#if report.attachment}
-											<div class="flex items-center gap-2 text-xs bg-blue-50/50 p-2.5 rounded-xl border border-blue-100 text-blue-700">
-												<span class="material-symbols-outlined text-lg shrink-0">link</span>
-												<span class="font-semibold">Attachment:</span>
-												<a href={report.attachment} target="_blank" class="hover:underline truncate font-semibold">
-													{report.attachment}
-												</a>
-											</div>
-										{/if}
 									</div>
 								</div>
 							{:else}
