@@ -6,9 +6,10 @@ import { google } from 'googleapis';
 
 export interface TaskItem {
 	text: string;
-	status: 'To-Do' | 'In-Progress' | 'Done' | 'Obstacle';
+	status: 'Done' | 'Obstacle' | 'Carry Over';
 	hours?: number;
 	priority?: 'Low' | 'Medium' | 'High';
+	project?: string;
 }
 
 export interface TaskReport {
@@ -161,7 +162,7 @@ export async function appendReportToSheets(
 		// Read existing rows to clear previous submissions for today to avoid duplicates
 		const getRes = await sheets.spreadsheets.values.get({
 			spreadsheetId,
-			range: `${sheetName}!A:J`
+			range: `${sheetName}!A:K`
 		});
 		const rows = getRes.data.values || [];
 
@@ -217,7 +218,7 @@ export async function appendReportToSheets(
 		}
 
 		// Prepare row values. Each task is a separate row.
-		// Columns: Timestamp, Date, Name, Task Description, Status, Wellness, Attachment, Notes, Hours, Priority
+		// Columns: Timestamp, Date, Name, Task Description, Status, Wellness, Attachment, Notes, Hours, Priority, Project
 		const timestamp = new Date().toISOString();
 		const values = tasks.map((task) => [
 			timestamp,
@@ -229,12 +230,13 @@ export async function appendReportToSheets(
 			attachment || '',
 			notes || '',
 			task.hours || 1,
-			task.priority || 'Medium'
+			task.priority || 'Medium',
+			task.project || 'General'
 		]);
 
 		await sheets.spreadsheets.values.append({
 			spreadsheetId,
-			range: `${sheetName}!A:J`,
+			range: `${sheetName}!A:K`,
 			valueInputOption: 'USER_ENTERED',
 			requestBody: {
 				values
@@ -325,7 +327,7 @@ export async function generateAISummary(store: WeeklyStore): Promise<string | nu
 			const report = store.submissions[name]?.[today];
 			if (report) {
 				const tasksFormatted = report.tasks
-					.map((t) => `- [${t.status}] [Priority: ${t.priority || 'Medium'}] ${t.text.trim()} (Duration: ${t.hours || 1} hours)`)
+					.map((t) => `- [${t.status}] [Project: ${t.project || 'General'}] [Priority: ${t.priority || 'Medium'}] ${t.text.trim()} (Duration: ${t.hours || 1} hours)`)
 					.join('\n  ');
 				let details = `- **${name}**:\n  ${tasksFormatted}`;
 				if (report.notes) details += `\n  Notes: ${report.notes}`;
@@ -344,7 +346,7 @@ Please generate a professional, concise, and informative Executive Summary in En
 The summary must use markdown format with the following guidelines:
 1. A brief summary of the team's overall progress today (2-3 sentences).
 2. Key achievements of the team (Major Achievements) or finished work (Done).
-3. Ongoing work (In-Progress / To-Do).
+3. Tasks carried over to the next work day (Carry Over).
 4. Clearly highlight any obstacles (Obstacles) if reported.
 The summary must be written in professional English, concise and to the point. Do not include introductory greetings or concluding signatures.`;
 
@@ -380,7 +382,7 @@ export async function sendObstacleAlert(
 
 	const fields = obstacles.map((obs) => ({
 		name: '⚠️ Obstacle',
-		value: `[Priority: **${obs.priority || 'Medium'}**] ${obs.text.trim()} (Duration: **${obs.hours || 1}h**)`,
+		value: `[Project: **${obs.project || 'General'}**] [Priority: **${obs.priority || 'Medium'}**] ${obs.text.trim()} (Duration: **${obs.hours || 1}h**)`,
 		inline: false
 	}));
 
@@ -460,13 +462,17 @@ export function compileWeeklyCSV(store: WeeklyStore): string {
 		'Timestamp',
 		'Date',
 		'Employee Name',
-		'Task Description',
+		'Project',
+		'Task 
+		Description',
 		'Status',
-		'Wellness',
-		'Attachment',
-		'Notes',
 		'Hours',
-		'Priority'
+		'Priority',	
+		'Notes',
+		'Attachment',
+		'Wellness'
+		
+		
 	];
 	const rows = [headers.join(',')];
 
@@ -478,6 +484,7 @@ export function compileWeeklyCSV(store: WeeklyStore): string {
 				const escapedTask = `"${task.text.replace(/"/g, '""')}"`;
 				const escapedNotes = report.notes ? `"${report.notes.replace(/"/g, '""')}"` : '""';
 				const escapedAttachment = report.attachment ? `"${report.attachment.replace(/"/g, '""')}"` : '""';
+				const escapedProject = `"${(task.project || 'General').replace(/"/g, '""')}"`;
 
 				const row = [
 					report.submittedAt,
@@ -489,7 +496,8 @@ export function compileWeeklyCSV(store: WeeklyStore): string {
 					escapedAttachment,
 					escapedNotes,
 					task.hours || 1,
-					task.priority || 'Medium'
+					task.priority || 'Medium',
+					escapedProject
 				];
 				rows.push(row.join(','));
 			}
@@ -552,10 +560,9 @@ export async function sendDiscordWebhook(store: WeeklyStore): Promise<boolean> {
 	}
 
 	const statusEmoji = {
-		'To-Do': '📝',
-		'In-Progress': '🔄',
 		'Done': '✅',
-		'Obstacle': '⚠️'
+		'Obstacle': '⚠️',
+		'Carry Over': '⏩'
 	};
 
 	let aiSummary: string | null = null;
@@ -571,7 +578,7 @@ export async function sendDiscordWebhook(store: WeeklyStore): Promise<boolean> {
 		const report = store.submissions[name]?.[today];
 		if (report) {
 			let tasksFormatted = report.tasks
-				.map((t) => `${statusEmoji[t.status] || '❓'} [${t.priority || 'Medium'}] ${t.text.trim()} (${t.hours || 1}h)`)
+				.map((t) => `${statusEmoji[t.status] || '❓'} [${t.project || 'General'}] [${t.priority || 'Medium'}] ${t.text.trim()} (${t.hours || 1}h)`)
 				.join('\n');
 
 			if (report.wellness) {

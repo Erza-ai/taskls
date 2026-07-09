@@ -51,7 +51,7 @@ export const actions: Actions = {
 			});
 		}
 
-		let tasks: Array<{ text: string; status: 'To-Do' | 'In-Progress' | 'Done' | 'Obstacle'; hours: number; priority: 'Low' | 'Medium' | 'High' }> = [];
+		let tasks: Array<{ text: string; status: 'Done' | 'Obstacle' | 'Carry Over'; hours: number; priority: 'Low' | 'Medium' | 'High'; project: string }> = [];
 		try {
 			if (tasksStr) {
 				tasks = JSON.parse(tasksStr);
@@ -70,7 +70,7 @@ export const actions: Actions = {
 			});
 		}
 
-		const validStatuses = ['To-Do', 'In-Progress', 'Done', 'Obstacle'];
+		const validStatuses = ['Done', 'Obstacle', 'Carry Over'];
 		const validPriorities = ['Low', 'Medium', 'High'];
 		for (let i = 0; i < tasks.length; i++) {
 			const item = tasks[i];
@@ -96,6 +96,13 @@ export const actions: Actions = {
 			// Validate & default priority
 			if (!item.priority || !validPriorities.includes(item.priority)) {
 				item.priority = 'Medium';
+			}
+
+			// Validate & default project
+			if (!item.project || !item.project.trim()) {
+				item.project = 'General';
+			} else {
+				item.project = item.project.trim();
 			}
 		}
 
