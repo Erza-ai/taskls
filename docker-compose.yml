@@ -15,5 +15,7 @@ services:
       - AI_BASE_URL=${AI_BASE_URL:-}
       - AI_MODEL=${AI_MODEL:-gpt-4o-mini}
       - AI_API_KEY=${AI_API_KEY:-}
+      - GOOGLE_SPREADSHEET_ID=${GOOGLE_SPREADSHEET_ID:-}
+      - GOOGLE_SERVICE_ACCOUNT_KEY=${GOOGLE_SERVICE_ACCOUNT_KEY:-}
       - NODE_ENV=${APP_ENV:-production}
     restart: unless-stopped
