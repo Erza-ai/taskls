@@ -218,20 +218,20 @@ export async function appendReportToSheets(
 		}
 
 		// Prepare row values. Each task is a separate row.
-		// Columns: Timestamp, Date, Name, Task Description, Status, Wellness, Attachment, Notes, Hours, Priority, Project
+		// Columns: Timestamp, Date, Employee Name, Project, Task Description, Status, Hours, Priority, Notes, Attachment, Wellness
 		const timestamp = new Date().toISOString();
 		const values = tasks.map((task) => [
 			timestamp,
 			todayStr,
 			employeeName,
+			task.project || 'General',
 			task.text.trim(),
 			task.status,
-			wellness,
-			attachment || '',
-			notes || '',
 			task.hours || 1,
 			task.priority || 'Medium',
-			task.project || 'General'
+			notes || '',
+			attachment || '',
+			wellness
 		]);
 
 		await sheets.spreadsheets.values.append({
@@ -463,8 +463,7 @@ export function compileWeeklyCSV(store: WeeklyStore): string {
 		'Date',
 		'Employee Name',
 		'Project',
-		'Task 
-		Description',
+		'Task Description',
 		'Status',
 		'Hours',
 		'Priority',	
@@ -490,14 +489,14 @@ export function compileWeeklyCSV(store: WeeklyStore): string {
 					report.submittedAt,
 					dateStr,
 					employeeName,
+					escapedProject,
 					escapedTask,
 					task.status,
-					report.wellness || 'Good',
-					escapedAttachment,
-					escapedNotes,
 					task.hours || 1,
 					task.priority || 'Medium',
-					escapedProject
+					escapedNotes,
+					escapedAttachment,
+					report.wellness || 'Good'
 				];
 				rows.push(row.join(','));
 			}
