@@ -153,6 +153,10 @@ export async function appendReportToSheets(
 			}
 		}
 
+		if (credentials && typeof credentials.private_key === 'string') {
+			credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
+		}
+
 		const auth = new google.auth.GoogleAuth({
 			credentials,
 			scopes: ['https://www.googleapis.com/auth/spreadsheets']
