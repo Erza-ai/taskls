@@ -10,6 +10,8 @@ export interface TaskItem {
 	hours?: number;
 	priority?: 'Low' | 'Medium' | 'High';
 	project?: string;
+	notes?: string;
+	attachment?: string;
 }
 
 export interface TaskReport {
@@ -17,8 +19,6 @@ export interface TaskReport {
 	tasks: TaskItem[];
 	submittedAt: string;
 	wellness: 'Good' | 'Tired' | 'Blocked';
-	notes?: string;
-	attachment?: string;
 }
 
 export interface WeeklyStore {
@@ -121,9 +121,7 @@ async function saveStore(store: WeeklyStore): Promise<void> {
 export async function appendReportToSheets(
 	employeeName: string,
 	tasks: TaskItem[],
-	wellness: 'Good' | 'Tired' | 'Blocked',
-	notes: string,
-	attachment: string
+	wellness: 'Good' | 'Tired' | 'Blocked'
 ): Promise<void> {
 	try {
 		const spreadsheetId = env.GOOGLE_SPREADSHEET_ID || process.env.GOOGLE_SPREADSHEET_ID;
@@ -244,8 +242,8 @@ export async function appendReportToSheets(
 			task.status,
 			task.hours || 1,
 			task.priority || 'Medium',
-			notes || '',
-			attachment || '',
+			task.notes || '',
+			task.attachment || '',
 			wellness
 		]);
 
@@ -266,9 +264,7 @@ export async function appendReportToSheets(
 export async function saveReport(
 	employeeName: string,
 	tasks: TaskItem[],
-	wellness: 'Good' | 'Tired' | 'Blocked',
-	notes: string,
-	attachment: string
+	wellness: 'Good' | 'Tired' | 'Blocked'
 ): Promise<WeeklyStore> {
 	const store = await getStore();
 	const today = getTodayDateString();
@@ -281,22 +277,20 @@ export async function saveReport(
 		employeeName,
 		tasks,
 		submittedAt: new Date().toISOString(),
-		wellness,
-		notes,
-		attachment
+		wellness
 	};
 
 	await saveStore(store);
 
 	// Sync to Sheets
-	appendReportToSheets(employeeName, tasks, wellness, notes, attachment).catch((error) => {
+	appendReportToSheets(employeeName, tasks, wellness).catch((error) => {
 		console.error('Async error in appendReportToSheets:', error);
 	});
 
 	// Send instant Obstacle Alert if any exist
 	const obstacles = tasks.filter((t) => t.status === 'Obstacle');
 	if (obstacles.length > 0) {
-		sendObstacleAlert(employeeName, obstacles, notes).catch((error) => {
+		sendObstacleAlert(employeeName, obstacles).catch((error) => {
 			console.error('Async error in sendObstacleAlert:', error);
 		});
 	}
@@ -389,25 +383,25 @@ The summary must be written in professional English, concise and to the point. D
 
 export async function sendObstacleAlert(
 	employeeName: string,
-	obstacles: TaskItem[],
-	notes: string
+	obstacles: TaskItem[]
 ): Promise<void> {
 	const webhookUrl = env.DISCORD_WEBHOOK_URL || process.env.DISCORD_WEBHOOK_URL;
 	if (!webhookUrl || webhookUrl.includes('dummy-id') || webhookUrl === '') return;
 
-	const fields = obstacles.map((obs) => ({
-		name: '⚠️ Obstacle',
-		value: `[Project: **${obs.project || 'General'}**] [Priority: **${obs.priority || 'Medium'}**] ${obs.text.trim()} (Duration: **${obs.hours || 1}h**)`,
-		inline: false
-	}));
-
-	if (notes) {
-		fields.push({
-			name: '📝 General Notes',
-			value: notes.trim(),
+	const fields = obstacles.map((obs) => {
+		let val = `[Project: **${obs.project || 'General'}**] [Priority: **${obs.priority || 'Medium'}**] ${obs.text.trim()} (Duration: **${obs.hours || 1}h**)`;
+		if (obs.notes && obs.notes.trim()) {
+			val += `\n📝 **Notes:** ${obs.notes.trim()}`;
+		}
+		if (obs.attachment && obs.attachment.trim()) {
+			val += `\n📎 **Attachment:** ${obs.attachment.trim()}`;
+		}
+		return {
+			name: '⚠️ Obstacle',
+			value: val,
 			inline: false
-		});
-	}
+		};
+	});
 
 	const payload = {
 		content: '⚠️ **ATTENTION: New Obstacle / Blocker Reported!**',
@@ -496,8 +490,8 @@ export function compileWeeklyCSV(store: WeeklyStore): string {
 			const report = dates[dateStr];
 			for (const task of report.tasks) {
 				const escapedTask = `"${task.text.replace(/"/g, '""')}"`;
-				const escapedNotes = report.notes ? `"${report.notes.replace(/"/g, '""')}"` : '""';
-				const escapedAttachment = report.attachment ? `"${report.attachment.replace(/"/g, '""')}"` : '""';
+				const escapedNotes = task.notes ? `"${task.notes.replace(/"/g, '""')}"` : '""';
+				const escapedAttachment = task.attachment ? `"${task.attachment.replace(/"/g, '""')}"` : '""';
 				const escapedProject = `"${(task.project || 'General').replace(/"/g, '""')}"`;
 
 				const row = [
@@ -592,19 +586,18 @@ export async function sendDiscordWebhook(store: WeeklyStore): Promise<boolean> {
 		const report = store.submissions[name]?.[today];
 		if (report) {
 			let tasksFormatted = report.tasks
-				.map((t) => `${statusEmoji[t.status] || '❓'} [${t.project || 'General'}] [${t.priority || 'Medium'}] ${t.text.trim()} (${t.hours || 1}h)`)
+				.map((t) => {
+					let line = `${statusEmoji[t.status] || '❓'} [${t.project || 'General'}] [${t.priority || 'Medium'}] ${t.text.trim()} (${t.hours || 1}h)`;
+					if (t.notes && t.notes.trim()) line += `\n   *Notes:* ${t.notes.trim()}`;
+					if (t.attachment && t.attachment.trim()) line += `\n   *Link:* ${t.attachment.trim()}`;
+					return line;
+				})
 				.join('\n');
 
 			if (report.wellness) {
 				const wellnessEmoji =
 					report.wellness === 'Good' ? '🟢' : report.wellness === 'Tired' ? '🟡' : '🔴';
 				tasksFormatted = `Wellness: ${wellnessEmoji} **${report.wellness}**\n${tasksFormatted}`;
-			}
-			if (report.notes) {
-				tasksFormatted += `\n*Notes: ${report.notes}*`;
-			}
-			if (report.attachment) {
-				tasksFormatted += `\n📎 **Attachment:** ${report.attachment}`;
 			}
 
 			fields.push({
