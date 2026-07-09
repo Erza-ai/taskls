@@ -1,19 +1,34 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { invalidateAll } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
+	import { slide, fade, fly } from 'svelte/transition';
+
+	import { cn } from '$lib/utils';
+	import * as Popover from '$lib/components/ui/popover/index.js';
+	import * as Command from '$lib/components/ui/command/index.js';
+	import * as RadioGroup from '$lib/components/ui/radio-group/index.js';
 
 	let { data, form } = $props();
 
-	// Form state variables using Svelte 5 Runes
 	let submitting = $state(false);
 	let selectedEmployee = $state('');
-	let tasks = $state<Array<{ text: string; status: 'To-Do' | 'In-Progress' | 'Done' | 'Obstacle' }>>([
-		{ text: '', status: 'Done' }
+	let tasks = $state<Array<{ text: string; status: 'To-Do' | 'In-Progress' | 'Done' | 'Obstacle'; hours: number; priority: 'Low' | 'Medium' | 'High' }>>([
+		{ text: '', status: 'Done', hours: 1, priority: 'Medium' }
 	]);
+	let wellness = $state<'Good' | 'Tired' | 'Blocked'>('Good');
+	let notes = $state('');
+	let attachmentName = $state('');
+
+	// Active date tab selection (defaults to today)
+	let activeDate = $state(data.todayDate);
+
+	// Search & Status filters
+	let searchQuery = $state('');
+	let statusFilter = $state('All');
 
 	function addTask() {
-		tasks.push({ text: '', status: 'Done' });
+		tasks.push({ text: '', status: 'Done', hours: 1, priority: 'Medium' });
 	}
 
 	function removeTask(index: number) {
@@ -81,16 +96,13 @@
 
 		if (parsedMessages.length > 0) {
 			event.preventDefault();
-
-			// Fill the first one in the current task
 			tasks[index].text = parsedMessages[0];
-
-			// Create the rest as new tasks
 			const newTasks = parsedMessages.slice(1).map((msg) => ({
 				text: msg,
-				status: 'Done' as const
+				status: 'Done' as const,
+				hours: 1,
+				priority: 'Medium' as const
 			}));
-
 			if (newTasks.length > 0) {
 				tasks.splice(index + 1, 0, ...newTasks);
 			}
@@ -100,497 +112,685 @@
 	function handleGlobalPaste(event: ClipboardEvent) {
 		const target = event.target as HTMLElement;
 		const tagName = target?.tagName?.toUpperCase();
-		if (
-			tagName === 'INPUT' ||
-			tagName === 'TEXTAREA' ||
-			target?.isContentEditable
-		) {
+		if (tagName === 'INPUT' || tagName === 'TEXTAREA' || target?.isContentEditable) {
 			return;
 		}
-
 		const pastedText = event.clipboardData?.getData('text') || '';
 		const parsedMessages = parseGitLog(pastedText);
-
 		if (parsedMessages.length > 0) {
 			event.preventDefault();
-
 			tasks = parsedMessages.map((msg) => ({
 				text: msg,
-				status: 'Done' as const
+				status: 'Done' as const,
+				hours: 1,
+				priority: 'Medium' as const
 			}));
 		}
 	}
 
-	// Searchable Dropdown state variables
 	let isOpen = $state(false);
-	let searchQuery = $state('');
+	let employeeSearchQuery = $state('');
 	let dropdownRef: HTMLDivElement | undefined = $state(undefined);
+	let triggerRef = $state<HTMLButtonElement>(null!);
 
-	// Derived list of employees filtered by query
 	let filteredEmployees = $derived(
 		data.employees.filter((employee: string) =>
-			employee.toLowerCase().includes(searchQuery.toLowerCase())
+			employee.toLowerCase().includes(employeeSearchQuery.toLowerCase())
 		)
 	);
 
-	// Close dropdown when clicking outside of it
 	function handleDocumentClick(event: MouseEvent) {
 		if (dropdownRef && !dropdownRef.contains(event.target as Node)) {
 			isOpen = false;
 		}
 	}
 
-	// Clear task input and selection on success
+	function closeAndFocusTrigger() {
+		isOpen = false;
+		tick().then(() => {
+			triggerRef?.focus();
+		});
+	}
+
+	function selectEmployee(employee: string) {
+		selectedEmployee = employee;
+		closeAndFocusTrigger();
+	}
+
+	// Track the last employee we loaded data for — prevents re-running on polling refresh
+	let lastLoadedEmployee = $state('');
+
+	// Auto-load existing report data only when the selected employee CHANGES
 	$effect(() => {
-		if (form?.success) {
-			tasks = [{ text: '', status: 'Done' }];
-			selectedEmployee = '';
+		const employee = selectedEmployee; // track reactive dependency
+
+		if (employee === lastLoadedEmployee) return; // skip if employee didn't change (e.g. data polling refresh)
+		lastLoadedEmployee = employee;
+
+		if (employee) {
+			const report = data.submissions[employee]?.[data.todayDate];
+			if (report) {
+				tasks = JSON.parse(JSON.stringify(report.tasks));
+				wellness = report.wellness || 'Good';
+				notes = report.notes || '';
+				attachmentName = report.attachment || '';
+			} else {
+				tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium' }];
+				wellness = 'Good';
+				notes = '';
+				attachmentName = '';
+			}
+		} else {
+			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium' }];
+			wellness = 'Good';
+			notes = '';
+			attachmentName = '';
 		}
 	});
 
-	// Polling: reload data every 10 seconds to keep all clients synchronized
+	$effect(() => {
+		if (form?.success) {
+			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium' }];
+			selectedEmployee = '';
+			lastLoadedEmployee = ''; // reset guard so the same employee can reload fresh data next time
+			wellness = 'Good';
+			notes = '';
+			attachmentName = '';
+		}
+	});
+
 	onMount(() => {
 		const interval = setInterval(() => {
 			invalidateAll();
-		}, 10000);
+		}, 30000);
 
 		return () => clearInterval(interval);
 	});
 
-	// Computed reactivity using $derived
+	// Get dates of the current week (Monday-Friday)
+	let weekDays = $derived.by(() => {
+		const mondayDate = new Date(data.todayDate);
+		const day = mondayDate.getDay();
+		const diff = mondayDate.getDate() - day + (day === 0 ? -6 : 1);
+		const startOfWeek = new Date(mondayDate.setDate(diff));
+
+		return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map((name, index) => {
+			const d = new Date(startOfWeek);
+			d.setDate(startOfWeek.getDate() + index);
+			const yyyy = d.getFullYear();
+			const mm = String(d.getMonth() + 1).padStart(2, '0');
+			const dd = String(d.getDate()).padStart(2, '0');
+			const dateStr = `${yyyy}-${mm}-${dd}`;
+			return {
+				name,
+				dateStr,
+				formatted: d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+			};
+		});
+	});
+
 	let totalEmployees = $derived(data.employees.length);
-	let submissionsList = $derived(Object.values(data.submissions));
-	let submittedCount = $derived(submissionsList.length);
+	
+	// Submissions counts based on active date
+	let activeSubmissionsList = $derived(
+		data.employees
+			.map((emp: string) => data.submissions[emp]?.[activeDate])
+			.filter(Boolean)
+	);
+	let submittedCount = $derived(activeSubmissionsList.length);
+	
 	let percentProgress = $derived(
 		totalEmployees > 0 ? Math.round((submittedCount / totalEmployees) * 100) : 0
 	);
 
-	// Styling map for task statuses
+	// Display employees filtered by search query and status tab
+	let displayEmployees = $derived(
+		data.employees.filter((employee: string) => {
+			const report = data.submissions[employee]?.[activeDate];
+			
+			// Match Search Box
+			const matchesSearch =
+				employee.toLowerCase().includes(searchQuery.toLowerCase()) ||
+				(report?.tasks || []).some((t: any) =>
+					t.text.toLowerCase().includes(searchQuery.toLowerCase())
+				);
+
+			// Match Status Filter
+			const matchesStatus =
+				statusFilter === 'All' ||
+				(report?.tasks || []).some((t: any) => t.status === statusFilter);
+
+			return matchesSearch && matchesStatus;
+		})
+	);
+
 	const statusConfig = {
-		'To-Do': { bg: 'bg-brand-purple', emoji: '📝', text: 'To-Do' },
-		'In-Progress': { bg: 'bg-brand-blue', emoji: '🔄', text: 'In Progress' },
-		'Done': { bg: 'bg-brand-green', emoji: '✅', text: 'Done' },
-		'Obstacle': { bg: 'bg-brand-red', emoji: '⚠️', text: 'Obstacle' }
+		'To-Do': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-[#1a1a1a] text-white border-[#1a1a1a] shadow-md', icon: 'schedule', text: 'To-Do' },
+		'In-Progress': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-[#1a1a1a] text-white border-[#1a1a1a] shadow-md', icon: 'sync', text: 'In Progress' },
+		'Done': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-[#1a1a1a] text-white border-[#1a1a1a] shadow-md', icon: 'check_circle', text: 'Done' },
+		'Obstacle': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-red-500 text-white border-red-500 shadow-md', icon: 'warning', text: 'Obstacle' }
 	};
+
+	// Ticket link parser (Jira and GitHub)
+	function formatTaskText(text: string): string {
+		if (!text) return '';
+		let escaped = text
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#039;');
+
+		// Link Jira tickets like EX-123
+		escaped = escaped.replace(
+			/([A-Z]+-[0-9]+)/g,
+			'<a href="https://erzastudio.atlassian.net/browse/$1" target="_blank" class="text-blue-600 hover:underline font-semibold">$1</a>'
+		);
+
+		// Link GitHub references like #456
+		escaped = escaped.replace(
+			/#([0-9]+)/g,
+			'<a href="https://github.com/Roxxy17/taskls-erza/issues/$1" target="_blank" class="text-blue-600 hover:underline font-semibold">#$1</a>'
+		);
+
+		return escaped;
+	}
+
+	let hasUserSubmittedToday = $derived.by(() => {
+		if (!selectedEmployee) return false;
+		return data.submissions[selectedEmployee]?.[data.todayDate] !== undefined;
+	});
 </script>
 
 <svelte:head>
-	<title>Daily Task Report - TaskLS</title>
+	<title>TaskLS - Weekly Dashboard</title>
 </svelte:head>
 
 <svelte:window onclick={handleDocumentClick} onpaste={handleGlobalPaste} />
 
-<main class="min-h-screen p-4 md:p-8 flex flex-col items-center">
-	<div class="w-full max-w-6xl flex flex-col gap-8">
-		<!-- HEADER CARD -->
-		<header class="bg-brand-yellow border-4 border-black p-6 md:p-8 neo-shadow-lg flex flex-col gap-6">
-			<div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-				<div>
-					<span
-						class="bg-black text-white px-3 py-1 font-bold text-xs uppercase tracking-widest neo-border neo-shadow-sm inline-block mb-3"
-						>INTERNAL TOOL</span
-					>
-					<h1 class="text-3xl md:text-5xl font-black tracking-tight leading-none uppercase">
-						Daily Task Report
-					</h1>
-					<p class="text-sm md:text-base font-bold text-black/80 mt-1">
-						Laporan Harian Kolektif Karyawan untuk Discord Webhook
-					</p>
-				</div>
-				<div class="bg-white border-3 border-black px-4 py-3 font-extrabold text-center neo-shadow">
-					<div class="text-xs uppercase tracking-wider text-gray-500">HARI INI</div>
-					<div class="text-base md:text-lg">{data.todayDateFormatted}</div>
-				</div>
-			</div>
+<main class="max-w-7xl mx-auto space-y-6 md:space-y-8 p-4 sm:p-6 md:p-8 lg:py-12">
+	<!-- HEADER SECTION -->
+	<header data-purpose="page-header" class="animate-in fade-in slide-in-from-top-4 duration-500 ease-out">
+		<div class="flex justify-between items-start mb-3">
+			<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-green-100/50 text-[10px] sm:text-xs font-bold text-green-700 tracking-widest uppercase border border-green-200/50">
+				<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+				Internal Tool
+			</span>
+			<span class="text-xs sm:text-sm font-medium text-gray-500 bg-white/50 px-3 py-1 rounded-full border border-gray-200/50">{data.todayDateFormatted}</span>
+		</div>
+		<h1 class="text-3xl sm:text-4xl md:text-5xl font-extrabold tracking-tight mb-2 text-gray-900 leading-tight">TaskLS Dashboard</h1>
+		<p class="text-gray-500 text-sm md:text-base font-medium max-w-xl">Collective Weekly Employee Reports synced with Google Sheets & Discord Webhook.</p>
+	</header>
 
-			<!-- Progress Bar Section -->
-			<div class="border-t-3 border-black/20 pt-5">
-				<div class="flex items-center justify-between font-extrabold mb-2 text-sm md:text-base">
-					<span>PROGRESS PENGISIAN LAPORAN</span>
-					<span class="bg-white border-2 border-black px-2 py-0.5"
-						>{submittedCount} / {totalEmployees} Karyawan</span
-					>
-				</div>
-				<div class="w-full bg-white border-3 border-black h-8 overflow-hidden flex relative">
-					<div
-						class="bg-brand-green h-full border-r-3 border-black transition-all duration-500 ease-out"
-						style="width: {percentProgress}%"
-					></div>
-					<div
-						class="absolute inset-0 flex items-center justify-center font-black text-xs md:text-sm mix-blend-difference text-white"
-					>
-						{percentProgress}% SELESAI
-					</div>
-				</div>
+	<!-- PROGRESS CARD -->
+	<section class="bg-white rounded-2xl p-5 sm:p-6 custom-shadow border border-gray-100/50 transition-transform duration-300 hover:shadow-lg" data-purpose="submission-progress">
+		<div class="flex items-center justify-between mb-4">
+			<h2 class="text-[10px] sm:text-xs font-bold text-gray-800 tracking-wider uppercase flex items-center gap-2">
+				<span class="material-symbols-outlined text-lg text-gray-400">monitoring</span>
+				Submission Progress
+			</h2>
+			<span class="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-md">{percentProgress}% COMPLETED</span>
+		</div>
+		<div class="progress-bar-container mb-4 shadow-inner">
+			<div class="progress-bar-fill transition-all duration-700 ease-out relative overflow-hidden" style="width: {percentProgress}%;">
+				<div class="absolute inset-0 bg-white/20 w-full animate-[shimmer_2s_infinite]"></div>
 			</div>
-		</header>
+		</div>
+		<div class="flex justify-between text-sm font-bold">
+			<span class="text-gray-900 flex items-center gap-1.5">
+				<span class="material-symbols-outlined text-[16px] text-gray-400">group</span>
+				{submittedCount} <span class="text-gray-400 font-medium px-1">of</span> {totalEmployees} <span class="hidden sm:inline font-medium text-gray-400">Employees</span>
+			</span>
+		</div>
+	</section>
 
-		<!-- DISCORD Webhook Integration Status Banners -->
-		{#if data.discordSent}
-			<div
-				class="bg-brand-green border-4 border-black p-5 neo-shadow flex flex-col md:flex-row items-center justify-between gap-4"
-			>
-				<div class="flex items-center gap-3">
-					<span class="text-3xl">🎉</span>
-					<div>
-						<h2 class="text-lg font-black uppercase">Laporan Selesai & Dikirim!</h2>
-						<p class="text-sm font-semibold text-black/80">
-							Semua karyawan ({submittedCount}/{totalEmployees}) telah mengisi laporan hari ini.
-							Rangkuman telah sukses dipublish ke Discord Webhook.
-						</p>
-					</div>
-				</div>
-				<div
-					class="bg-black text-brand-green px-4 py-2 border-2 border-black font-extrabold text-xs uppercase tracking-wider neo-shadow-sm shrink-0"
-				>
-					DISCORD COMPLETED
-				</div>
-			</div>
-		{:else}
-			<div
-				class="bg-brand-blue border-4 border-black p-5 neo-shadow flex flex-col md:flex-row items-center justify-between gap-4"
-			>
-				<div class="flex items-center gap-3">
-					<span class="text-3xl">⏳</span>
-					<div>
-						<h2 class="text-lg font-black uppercase">Menunggu Laporan Kolektif</h2>
-						<p class="text-sm font-semibold text-black/80">
-							Tersisa {totalEmployees - submittedCount} karyawan lagi yang belum submit. Laporan harian
-							akan otomatis dikirim ke Discord setelah semua karyawan selesai lapor.
-						</p>
-					</div>
-				</div>
-				<div
-					class="bg-white border-2 border-black px-4 py-2 font-extrabold text-xs uppercase tracking-wider neo-shadow-sm shrink-0"
-				>
-					WAITING FOR ALL
-				</div>
+	<!-- NOTIFICATION CARDS -->
+	<div class="space-y-4">
+		{#if form?.error}
+			<div in:slide={{ duration: 300, axis: 'y' }} class="bg-red-50 rounded-2xl p-4 sm:p-5 border border-red-100 flex items-start sm:items-center gap-3 shadow-sm">
+				<span class="material-symbols-outlined text-red-500 bg-red-100 p-1.5 rounded-full">error</span>
+				<p class="text-sm font-semibold text-red-800">{form.error}</p>
 			</div>
 		{/if}
 
-		<!-- GRID LAYOUT -->
-		<div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
-			<!-- FORM COLUMN -->
-			<section class="lg:col-span-5 flex flex-col gap-6">
-				<div class="bg-white border-4 border-black p-6 neo-shadow">
-					<h2
-						class="text-xl font-black uppercase border-b-3 border-black pb-3 mb-5 flex items-center gap-2"
-					>
-						<span>📝</span> Isi Laporan Harian
-					</h2>
+		{#if form?.success}
+			<div in:slide={{ duration: 300, axis: 'y' }} class="bg-green-50 rounded-2xl p-4 sm:p-5 border border-green-100 flex items-start sm:items-center gap-3 shadow-sm">
+				<span class="material-symbols-outlined text-green-600 bg-green-100 p-1.5 rounded-full">check_circle</span>
+				<p class="text-sm font-semibold text-green-800">{form.message}</p>
+			</div>
+		{/if}
+	</div>
 
-					{#if form?.error}
-						<div
-							class="bg-brand-red border-3 border-black p-3 font-bold text-sm mb-5 neo-shadow-sm flex items-center gap-2"
-						>
-							<span>⚠️</span>
-							{form.error}
-						</div>
-					{/if}
-
-					{#if form?.success}
-						<div
-							class="bg-brand-green border-3 border-black p-3 font-bold text-sm mb-5 neo-shadow-sm flex items-center gap-2"
-						>
-							<span>✅</span>
-							{form.message}
-						</div>
-					{/if}
-
-					<form
-						method="POST"
-						use:enhance={() => {
-							submitting = true;
-							return async ({ update }) => {
-								await update();
-								submitting = false;
-							};
-						}}
-						class="flex flex-col gap-5"
-					>
-						<!-- Searchable Custom Dropdown Selection -->
-						<div class="flex flex-col gap-2" bind:this={dropdownRef}>
-							<span class="font-extrabold text-sm uppercase tracking-wide">Pilih Nama Karyawan</span>
-							<div class="relative">
-								<!-- Hidden input so the value gets submitted normally by the HTML form -->
-								<input type="hidden" name="employeeName" value={selectedEmployee} required />
-
-								<!-- Dropdown Toggle Button -->
+	<!-- CONTENT GRID -->
+	<div class="grid gap-6 md:gap-8 items-start grid-cols-1 lg:grid-cols-5">
+		<!-- REPORT FORM SECTION (Span 2) -->
+		<section class="bg-white rounded-[24px] p-5 sm:p-7 md:p-8 custom-shadow space-y-7 border border-gray-100/50 lg:col-span-2" data-purpose="daily-report-form">
+			<div class="flex items-center gap-3">
+				<div class="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center">
+					<span class="material-symbols-outlined text-gray-700">edit_document</span>
+				</div>
+				<h2 class="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">
+					{hasUserSubmittedToday ? 'Update Daily Report' : 'Fill Daily Report'}
+				</h2>
+			</div>
+			
+			<form
+				method="POST"
+				action="?/submitReport"
+				enctype="multipart/form-data"
+				use:enhance={() => {
+					submitting = true;
+					return async ({ update }) => {
+						await update();
+						submitting = false;
+					};
+				}}
+				class="flex flex-col gap-7"
+			>
+				<!-- Employee Select -->
+				<div class="space-y-2.5" bind:this={dropdownRef}>
+					<label for="employee-select" class="block text-sm font-semibold text-gray-700">Employee Name</label>
+					<input type="hidden" name="employeeName" value={selectedEmployee} required />
+					
+					<Popover.Root bind:open={isOpen}>
+						<Popover.Trigger bind:ref={triggerRef}>
+							{#snippet child({ props })}
 								<button
-									id="employeeDropdownBtn"
+									{...props}
+									id="employee-select"
 									type="button"
-									onclick={() => {
-										isOpen = !isOpen;
-										if (isOpen) searchQuery = '';
-									}}
-									class="w-full bg-white border-3 border-black p-3 font-extrabold flex justify-between items-center shadow-[3px_3px_0px_0px_#000] cursor-pointer text-sm outline-none focus:border-brand-yellow text-left"
+									role="combobox"
+									aria-expanded={isOpen}
+									class="w-full form-select bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl px-4 py-3.5 text-left text-sm flex items-center justify-between transition-all focus:border-gray-900 focus:ring-1 focus:ring-gray-900 shadow-sm"
+									class:text-gray-400={!selectedEmployee}
+									class:text-gray-900={selectedEmployee}
+									class:font-medium={selectedEmployee}
 								>
-									<span>{selectedEmployee || 'Pilih nama Anda...'}</span>
-									<div
-										class="absolute inset-y-0 right-0 flex items-center px-4 border-l-3 border-black bg-brand-yellow h-full pointer-events-none"
-									>
-										<svg
-											class="fill-current h-4 w-4 transition-transform duration-200 {isOpen
-												? 'rotate-180'
-												: ''}"
-											xmlns="http://www.w3.org/2000/svg"
-											viewBox="0 0 20 20"
-										>
-											<path
-												d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-											/>
-										</svg>
-									</div>
+									{selectedEmployee || 'Select your name...'}
+									<span class="material-symbols-outlined text-gray-400 text-xl transition-transform duration-200" class:rotate-180={isOpen}>expand_more</span>
 								</button>
-
-								<!-- Dropdown Menu -->
-								{#if isOpen}
-									<div
-										class="absolute z-20 left-0 right-0 mt-2 bg-white border-3 border-black shadow-[4px_4px_0px_0px_#000] flex flex-col p-3 gap-2"
-									>
-										<!-- Search Input -->
-										<div class="relative">
-											<input
-												id="employeeSearchInput"
-												type="text"
-												bind:value={searchQuery}
-												placeholder="Cari nama karyawan..."
-												class="w-full bg-white border-2 border-black p-2 font-semibold text-xs outline-none focus:bg-yellow-50/50"
-												autocomplete="off"
-											/>
-											<span class="absolute right-2.5 top-2 text-xs opacity-40">🔍</span>
-										</div>
-
-										<!-- Options List -->
-										<div
-											class="max-h-48 overflow-y-auto flex flex-col gap-1 pr-1 border-t-2 border-black/10 pt-2 mt-1"
-										>
-											{#if filteredEmployees.length === 0}
-												<div class="p-2 text-center text-xs font-bold text-gray-400 uppercase">
-													Karyawan Tidak Ditemukan
-												</div>
-											{:else}
-												{#each filteredEmployees as employee}
-													{@const hasSubmitted = data.submissions[employee] !== undefined}
-													<button
-														type="button"
-														disabled={hasSubmitted}
-														onclick={() => {
-															selectedEmployee = employee;
-															isOpen = false;
-															searchQuery = '';
-														}}
-														class="w-full text-left p-2 font-bold text-xs flex justify-between items-center transition-colors border border-transparent hover:border-black
-																	 {hasSubmitted
-																			? 'bg-gray-100/70 text-gray-400 cursor-not-allowed'
-																			: 'bg-white hover:bg-brand-yellow/20 cursor-pointer'}"
-													>
-														<span>{employee}</span>
-														{#if hasSubmitted}
-															<span
-																class="text-[10px] font-black text-brand-green bg-white border-2 border-black px-1.5 py-0.2 shadow-[1px_1px_0px_0px_#000]"
-																>SUDAH LAPOR ✓</span
-															>
-														{/if}
-													</button>
-												{/each}
-											{/if}
-										</div>
-									</div>
-								{/if}
-							</div>
-						</div>
-
-						<!-- Hidden input serialize tasks array to JSON -->
-						<input type="hidden" name="tasks" value={JSON.stringify(tasks)} />
-
-						<!-- Pekerjaan / Task Description Array -->
-						<div class="flex flex-col gap-4">
-							<div class="flex items-center justify-between border-b-3 border-black pb-2">
-								<span class="font-extrabold text-sm uppercase tracking-wide">Daftar Task / Pekerjaan Hari Ini</span>
-								<button
-									type="button"
-									onclick={addTask}
-									class="bg-brand-blue border-2 border-black px-2.5 py-1 text-xs font-black uppercase shadow-[2px_2px_0px_0px_#000] hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[1px_1px_0px_0px_#000] cursor-pointer"
-								>
-									+ Tambah Task
-								</button>
-							</div>
-
-							{#each tasks as task, index}
-								<div class="border-3 border-black p-4 bg-gray-50 flex flex-col gap-4 relative neo-shadow-sm">
-									<div class="flex items-center justify-between border-b-2 border-black/10 pb-2">
-										<span class="font-black text-xs uppercase text-gray-500">Task #{index + 1}</span>
-										{#if tasks.length > 1}
-											<button
-												type="button"
-												onclick={() => removeTask(index)}
-												class="bg-brand-red text-white border-2 border-black px-2 py-0.5 text-[10px] font-black uppercase shadow-[1px_1px_0px_0px_#000] hover:translate-x-[0.5px] hover:translate-y-[0.5px] hover:shadow-[0.5px_0.5px_0px_0px_#000] cursor-pointer"
+							{/snippet}
+						</Popover.Trigger>
+						<Popover.Content class="w-[--anchor-width] p-1 border border-gray-200 rounded-xl shadow-xl bg-white">
+							<Command.Root class="bg-transparent">
+								<div class="flex items-center px-3 border-b border-gray-100 pb-1">
+									<span class="material-symbols-outlined text-gray-400 text-lg mr-2">search</span>
+									<Command.Input placeholder="Search employee..." class="border-none focus:ring-0 text-sm h-11 px-0 py-3 w-full outline-none placeholder:text-gray-400" />
+								</div>
+								<Command.List class="max-h-[250px] overflow-y-auto scrollbar-hide py-1">
+									<Command.Empty class="py-6 text-center text-sm font-medium text-gray-500">No employee found.</Command.Empty>
+									<Command.Group>
+										{#each filteredEmployees as employee (employee)}
+											{@const hasSubmitted = data.submissions[employee]?.[data.todayDate] !== undefined}
+											<Command.Item
+												value={employee}
+												onSelect={() => selectEmployee(employee)}
+												class={cn(
+													"py-3 px-3 mx-1 my-0.5 rounded-lg cursor-pointer text-sm font-semibold text-gray-700 transition-colors flex items-center justify-between",
+													'hover:bg-gray-100 aria-selected:bg-gray-100 aria-selected:text-gray-900'
+												)}
 											>
-												Hapus
-											</button>
-										{/if}
-									</div>
+												{employee}
+												{#if hasSubmitted}
+													<span class="flex items-center gap-1 text-[10px] uppercase font-bold text-green-600 bg-green-50 px-2 py-1 rounded shadow-sm border border-green-100">
+														<span class="material-symbols-outlined text-[14px]">edit</span> Submitted
+													</span>
+												{/if}
+											</Command.Item>
+										{/each}
+									</Command.Group>
+								</Command.List>
+							</Command.Root>
+						</Popover.Content>
+					</Popover.Root>
+				</div>
 
-									<div class="flex flex-col gap-2">
-										<label for="task-text-{index}" class="font-extrabold text-xs uppercase tracking-wide">
-											Deskripsi Pekerjaan
-											<span class="text-gray-400 font-normal text-[10px] normal-case ml-1">(Bisa copas git log untuk auto-split)</span>
-										</label>
-										<textarea
-											id="task-text-{index}"
-											bind:value={task.text}
-											onpaste={(e) => handlePaste(e, index)}
+				<!-- Wellness Check-in -->
+				<div class="space-y-2.5">
+					<span class="block text-sm font-semibold text-gray-700">Wellness Status (How is your energy today?)</span>
+					<div class="grid grid-cols-3 gap-2">
+						{#each [['Good', '🟢 Great'], ['Tired', '🟡 Tired'], ['Blocked', '🔴 Blocked']] as [val, label]}
+							<button
+								type="button"
+								onclick={() => wellness = val as any}
+								class="py-3 px-2 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 border select-none transition-all active:scale-95"
+								class:bg-black={wellness === val}
+								class:border-black={wellness === val}
+								class:text-white={wellness === val}
+								class:bg-gray-50={wellness !== val}
+								class:border-gray-200={wellness !== val}
+								class:text-gray-700={wellness !== val}
+							>
+								{label}
+							</button>
+						{/each}
+					</div>
+					<input type="hidden" name="wellness" value={wellness} />
+				</div>
+
+				<input type="hidden" name="tasks" value={JSON.stringify(tasks)} />
+
+				<!-- Task List Section -->
+				<div class="space-y-4">
+					<div class="flex justify-between items-center pb-2 border-b border-gray-100">
+						<div class="flex items-center gap-2">
+							<span class="material-symbols-outlined text-gray-400 text-lg">checklist</span>
+							<span class="text-sm font-bold text-gray-900">Tasks List</span>
+						</div>
+						<button type="button" onclick={addTask} class="bg-gray-100 hover:bg-gray-200 text-gray-900 px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm">
+							<span class="material-symbols-outlined text-[16px]">add</span> Add Task
+						</button>
+					</div>
+
+					<div class="space-y-5">
+						{#each tasks as task, index (index)}
+							<div in:slide={{ duration: 300 }} class="bg-gray-50/80 rounded-2xl p-4 sm:p-5 border border-gray-200 space-y-4 relative group transition-all duration-200 hover:border-gray-300 hover:bg-gray-50">
+								<div class="flex justify-between items-center">
+									<h4 class="text-xs sm:text-sm font-bold text-gray-600 bg-white px-3 py-1 rounded-full border border-gray-200 shadow-sm">
+										Task {index + 1}
+									</h4>
+									{#if tasks.length > 1}
+										<button type="button" onclick={() => removeTask(index)} class="text-gray-400 hover:text-red-500 bg-white hover:bg-red-50 rounded-full p-1.5 transition-colors border border-gray-200 hover:border-red-200 shadow-sm" title="Remove Task">
+											<span class="material-symbols-outlined text-[16px] block">close</span>
+										</button>
+									{/if}
+								</div>
+								
+								<textarea
+									id="task-text-{index}"
+									bind:value={task.text}
+									onpaste={(e: ClipboardEvent) => handlePaste(e, index)}
+									required
+									class="w-full form-textarea bg-white border border-gray-200 rounded-xl p-4 text-sm font-medium text-gray-800 min-h-[100px] resize-y focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none transition-all placeholder:text-gray-400 shadow-sm"
+									placeholder="Enter task description (paste git log to auto-split)..."
+								></textarea>
+
+								<!-- Hours & Priority Inputs -->
+								<div class="grid grid-cols-2 gap-3 sm:gap-4">
+									<div class="space-y-1.5">
+										<span class="block text-xs font-semibold text-gray-500">Duration (Hours Spent)</span>
+										<input
+											id="task-hours-{index}"
+											type="number"
+											step="0.5"
+											min="0.5"
+											max="24"
+											bind:value={task.hours}
 											required
-											placeholder="Tuliskan detail pekerjaan..."
-											rows="2"
-											class="w-full bg-white border-2 border-black p-3 font-semibold text-xs outline-none focus:border-brand-yellow placeholder:text-gray-400"
-										></textarea>
+											class="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 focus:border-gray-900 outline-none transition-all shadow-sm"
+										/>
 									</div>
-
-									<div class="flex flex-col gap-2">
-										<span class="font-extrabold text-xs uppercase tracking-wide">Status Task</span>
-										<div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-											{#each Object.entries(statusConfig) as [key, config]}
-												<label
-													class="flex items-center justify-center gap-1.5 p-2 cursor-pointer border-2 border-black text-[10px] font-extrabold select-none transition-all duration-100
-													{task.status === key
-														? `${config.bg} translate-x-[1px] translate-y-[1px] shadow-[1px_1px_0px_0px_#000]`
-														: 'bg-white shadow-[2px_2px_0px_0px_#000] hover:-translate-x-[0.5px] hover:-translate-y-[0.5px] hover:shadow-[2.5px_2.5px_0px_0px_#000]'}"
-												>
-													<input
-														type="radio"
-														name="status-{index}"
-														value={key}
-														bind:group={task.status}
-														class="sr-only"
-														required
-													/>
-													<span>{config.emoji}</span>
-													<span>{config.text}</span>
-												</label>
-											{/each}
-										</div>
+									<div class="space-y-1.5">
+										<span class="block text-xs font-semibold text-gray-500">Priority</span>
+										<select
+											id="task-priority-{index}"
+											bind:value={task.priority}
+											required
+											class="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 focus:border-gray-900 outline-none transition-all shadow-sm cursor-pointer"
+										>
+											<option value="Low">🟢 Low</option>
+											<option value="Medium">🟡 Medium</option>
+											<option value="High">🔴 High</option>
+										</select>
 									</div>
 								</div>
-							{/each}
-						</div>
-
-						<!-- Submit Button -->
-						<div class="pt-2">
-							<button
-								type="submit"
-								disabled={submitting}
-								class="w-full neo-btn bg-brand-yellow p-4 font-black text-sm tracking-widest uppercase cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-							>
-								{#if submitting}
-									Menyimpan Laporan...
-								{:else}
-									Kirim Laporan Harian 🚀
-								{/if}
-							</button>
-						</div>
-					</form>
-				</div>
-			</section>
-
-			<!-- SUBMISSIONS BOARD COLUMN -->
-			<section class="lg:col-span-7 flex flex-col gap-6">
-				<div class="bg-white border-4 border-black p-6 neo-shadow h-full flex flex-col">
-					<h2
-						class="text-xl font-black uppercase border-b-3 border-black pb-3 mb-5 flex items-center justify-between"
-					>
-						<span>📋 Status & Laporan Karyawan</span>
-						<span
-							class="text-[10px] font-black bg-brand-yellow px-2 py-0.5 border-2 border-black neo-shadow-sm"
-							>LIVE UPDATING</span
-						>
-					</h2>
-
-					<div class="flex flex-col gap-4 overflow-y-auto max-h-[600px] pr-1 flex-grow">
-						{#each data.employees as employee}
-							{@const report = data.submissions[employee]}
-							{#if report}
-								<!-- Submitted Employee Card -->
-								<div
-									class="bg-white border-3 border-black p-4 neo-shadow flex flex-col gap-3 relative transition-all hover:scale-[1.01]"
-								>
-									<!-- Neo decoration -->
-									<div class="absolute top-0 right-0 w-4 h-4 border-l-3 border-b-3 border-black bg-black"></div>
-
-									<div
-										class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b-2 border-black/10 pb-2"
-									>
-										<span class="font-extrabold text-base tracking-wide uppercase flex items-center gap-2">
-											👤 {employee}
-										</span>
-									</div>
-
-									<div class="flex flex-col gap-3 pl-1">
-										{#each report.tasks || [] as item}
-											{@const config = statusConfig[item.status] || statusConfig['Done']}
-											<div class="flex items-start gap-2 text-sm font-semibold text-black/90 leading-relaxed">
-												<span
-													class="inline-flex items-center gap-1.5 px-2 py-0.5 font-bold text-[10px] uppercase border-2 border-black {config.bg} shadow-[1.5px_1.5px_0px_0px_#000] shrink-0 mt-0.5"
-												>
-													<span>{config.emoji}</span>
-													<span>{config.text}</span>
-												</span>
-												<span class="whitespace-pre-wrap">{item.text}</span>
-											</div>
+								
+								<!-- Radio Buttons Grid -->
+								<RadioGroup.Root bind:value={task.status}>
+									<div class="grid grid-cols-2 gap-2 sm:gap-3">
+										{#each Object.entries(statusConfig) as [key, config]}
+											<label for="status-{index}-{key}" class={cn("cursor-pointer py-2.5 sm:py-3 px-2 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 sm:gap-2 transition-all border select-none active:scale-95", task.status === key ? config.active : config.bg)}>
+												<RadioGroup.Item value={key} id="status-{index}-{key}" class="sr-only" />
+												<span class="material-symbols-outlined text-[18px] sm:text-[20px]">{config.icon}</span> 
+												<span class="truncate">{config.text}</span>
+											</label>
 										{/each}
 									</div>
-
-									<div
-										class="flex justify-end text-[9px] font-bold text-gray-400 uppercase tracking-wider border-t border-black/5 pt-2"
-									>
-										Laporan masuk: {new Date(report.submittedAt).toLocaleTimeString('id-ID', {
-											hour: '2-digit',
-											minute: '2-digit'
-										})} WIB
-									</div>
-								</div>
-							{:else}
-								<!-- Not Submitted Skeleton -->
-								<div
-									class="border-3 border-dashed border-gray-300 bg-gray-50/50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-gray-500"
-								>
-									<span class="font-bold text-sm tracking-wide uppercase flex items-center gap-2">
-										<span class="opacity-50">👤</span> {employee}
-									</span>
-									<span
-										class="inline-flex items-center gap-1 px-3 py-1 font-bold text-[10px] uppercase tracking-wider border-2 border-dashed border-gray-300 bg-white"
-									>
-										❌ Belum Mengisi Laporan
-									</span>
-								</div>
-							{/if}
+								</RadioGroup.Root>
+							</div>
 						{/each}
 					</div>
 				</div>
-			</section>
-		</div>
 
-		<!-- FOOTER -->
-		<footer
-			class="text-center font-bold text-xs md:text-sm uppercase tracking-wider py-8 flex flex-col gap-2"
-		>
-			<div>TASKLS APP • NEO-BRUTALISM EDITION</div>
-			<div class="text-gray-400">Data otomatis direset setiap hari baru</div>
-		</footer>
+				<!-- Notes Field -->
+				<div class="space-y-2.5">
+					<label for="notes-textarea" class="block text-sm font-semibold text-gray-700">General Notes</label>
+					<textarea
+						id="notes-textarea"
+						name="notes"
+						bind:value={notes}
+						class="w-full form-textarea bg-white border border-gray-200 rounded-xl p-4 text-sm font-medium text-gray-800 min-h-[80px] resize-y focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none transition-all placeholder:text-gray-400 shadow-sm"
+						placeholder="Add any additional daily notes or remarks here... (Optional)"
+					></textarea>
+				</div>
+
+				<!-- Attachment Link Field -->
+				<div class="space-y-2.5">
+					<span class="block text-sm font-semibold text-gray-700">Attachment Link (Figma/Loom/PR URL)</span>
+					<input
+						id="attachment-link"
+						type="url"
+						name="attachment"
+						bind:value={attachmentName}
+						placeholder="https://example.com/screenshot-or-link"
+						class="w-full form-input bg-white border border-gray-200 rounded-xl p-4 text-sm font-medium text-gray-800 focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none transition-all placeholder:text-gray-400 shadow-sm"
+					/>
+				</div>
+
+				<!-- Submit Button -->
+				<button type="submit" disabled={submitting} class="w-full bg-[#1a1a1a] hover:bg-black text-white font-bold py-4 rounded-xl text-sm transition-all mt-2 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2.5 shadow-lg shadow-black/10 active:scale-[0.98]">
+					{#if submitting}
+						<span class="material-symbols-outlined animate-spin text-xl">progress_activity</span> 
+						<span>Submitting...</span>
+					{:else}
+						<span class="material-symbols-outlined text-xl">send</span>
+						<span>{hasUserSubmittedToday ? 'Update Daily Report' : 'Submit Daily Report'}</span>
+					{/if}
+				</button>
+			</form>
+		</section>
+
+		<!-- TEAM BOARD SECTION (Span 3) -->
+		<section class="space-y-5 lg:col-span-3" data-purpose="team-board">
+			<!-- Tab Board Header & Reminder -->
+			<div class="flex justify-between items-center px-1 lg:pt-3">
+				<div class="flex items-center gap-3">
+					<div class="w-10 h-10 rounded-xl bg-white custom-shadow flex items-center justify-center">
+						<span class="material-symbols-outlined text-gray-700">dashboard</span>
+					</div>
+					<h2 class="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Team Board</h2>
+				</div>
+				
+				<div class="flex items-center gap-2">
+					<!-- Poke Pending Form Button -->
+					<form method="POST" action="?/pokePending" use:enhance>
+						<button type="submit" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-sm select-none active:scale-95" title="Remind pending team members on Discord">
+							<span class="material-symbols-outlined text-[16px]">notifications_active</span> Poke Pending
+						</button>
+					</form>
+
+					<span class="bg-green-100 text-green-700 text-[10px] sm:text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-2 uppercase tracking-widest border border-green-200">
+						Live <span class="w-2 h-2 bg-green-500 rounded-full inline-block animate-pulse shadow-[0_0_8px_rgba(34,197,94,0.6)]"></span>
+					</span>
+				</div>
+			</div>
+			
+			<div class="bg-white rounded-[24px] custom-shadow border border-gray-100 p-4 sm:p-5 flex flex-col h-[600px] sm:h-[700px] lg:h-[calc(100vh-200px)] lg:max-h-[900px] relative">
+				
+				<!-- Monday - Friday Tabs -->
+				<div class="flex border-b border-gray-100 mb-4 overflow-x-auto scrollbar-hide shrink-0">
+					{#each weekDays as day}
+						<button
+							type="button"
+							onclick={() => activeDate = day.dateStr}
+							class="py-2.5 px-4 font-bold text-xs sm:text-sm border-b-2 whitespace-nowrap transition-colors"
+							class:border-[#1a1a1a]={activeDate === day.dateStr}
+							class:text-[#1a1a1a]={activeDate === day.dateStr}
+							class:border-transparent={activeDate !== day.dateStr}
+							class:text-gray-400={activeDate !== day.dateStr}
+						>
+							{day.name} ({day.formatted})
+						</button>
+					{/each}
+				</div>
+
+				<!-- Search & Filter Controls -->
+				<div class="flex flex-col sm:flex-row gap-3 mb-5 shrink-0">
+					<div class="relative flex-1">
+						<span class="material-symbols-outlined text-gray-400 text-lg absolute left-3.5 top-1/2 -translate-y-1/2">search</span>
+						<input
+							type="text"
+							bind:value={searchQuery}
+							placeholder="Search name or task content..."
+							class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-xs sm:text-sm focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none transition-all shadow-sm placeholder:text-gray-400 bg-gray-50/50"
+						/>
+					</div>
+					<div class="flex gap-1.5 overflow-x-auto scrollbar-hide">
+						{#each ['All', 'Done', 'In-Progress', 'To-Do', 'Obstacle'] as filter}
+							<button
+								type="button"
+								onclick={() => statusFilter = filter}
+								class="px-3.5 py-2.5 rounded-xl text-xs font-bold border transition-colors select-none whitespace-nowrap active:scale-95"
+								class:bg-[#1a1a1a]={statusFilter === filter}
+								class:text-white={statusFilter === filter}
+								class:border-[#1a1a1a]={statusFilter === filter}
+								class:bg-gray-50={statusFilter !== filter}
+								class:text-gray-600={statusFilter !== filter}
+								class:border-gray-200={statusFilter !== filter}
+							>
+								{filter}
+							</button>
+						{/each}
+					</div>
+				</div>
+
+				<!-- Submissions List -->
+				<div class="flex-1 overflow-y-auto p-1 space-y-3.5 scrollbar-hide relative z-0">
+					{#each displayEmployees as employee, i (employee)}
+						{@const report = data.submissions[employee]?.[activeDate]}
+						<div in:fly={{ y: 20, duration: 400, delay: i * 40 }}>
+							{#if report}
+								<div class="bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all duration-300 hover:border-gray-400 hover:shadow-md group">
+									<div class="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 bg-gray-50 border-b border-gray-100 group-hover:bg-gray-100/50 transition-colors">
+										<div class="flex items-center gap-3">
+											<div class="w-8 h-8 rounded-lg bg-[#1a1a1a] text-white flex items-center justify-center text-sm font-bold shadow-sm">
+												{employee.charAt(0).toUpperCase()}
+											</div>
+											<span class="font-bold text-sm sm:text-base text-gray-900">{employee}</span>
+										</div>
+										<span class="text-[10px] sm:text-xs font-mono text-gray-500 font-semibold bg-white px-2 py-1 rounded-md border border-gray-200 shadow-sm">
+											{new Date(report.submittedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+										</span>
+									</div>
+									<div class="p-4 sm:p-5 space-y-4">
+										<!-- Wellness Indicator -->
+										{#if report.wellness}
+											<div class="flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-lg bg-gray-50 border border-gray-200 w-max text-gray-700">
+												<span>Wellness:</span>
+												{#if report.wellness === 'Good'}
+													<span class="text-green-600">🟢 Great</span>
+												{:else if report.wellness === 'Tired'}
+													<span class="text-yellow-600">🟡 Tired</span>
+												{:else}
+													<span class="text-red-600">🔴 Blocked</span>
+												{/if}
+											</div>
+										{/if}
+
+										<!-- Task Listing -->
+										<div class="space-y-3">
+											{#each report.tasks || [] as item}
+												{@const config = statusConfig[item.status] || statusConfig['Done']}
+												<div class="flex items-start gap-3 sm:gap-4 text-sm group/task">
+													<div class="flex flex-col gap-1 shrink-0">
+														<span class="px-2.5 py-1 rounded-md text-[10px] sm:text-xs font-bold bg-gray-50 border border-gray-200 text-gray-600 uppercase flex items-center gap-1.5 whitespace-nowrap mt-0.5 shadow-sm group-hover/task:border-gray-300 transition-colors">
+															<span class="material-symbols-outlined text-[14px]">{config.icon}</span> <span>{config.text}</span>
+														</span>
+														
+														<div class="flex items-center gap-1">
+															<span class="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-extrabold uppercase border text-center whitespace-nowrap"
+																class:bg-red-50={item.priority === 'High'} class:text-red-700={item.priority === 'High'} class:border-red-200={item.priority === 'High'}
+																class:bg-yellow-50={item.priority === 'Medium'} class:text-yellow-700={item.priority === 'Medium'} class:border-yellow-200={item.priority === 'Medium'}
+																class:bg-green-50={item.priority === 'Low'} class:text-green-700={item.priority === 'Low'} class:border-green-200={item.priority === 'Low'}
+															>
+																{item.priority || 'Medium'}
+															</span>
+															<span class="px-1.5 py-0.5 rounded text-[8px] sm:text-[9px] font-bold bg-gray-100 border border-gray-200 text-gray-600 uppercase text-center whitespace-nowrap">
+																🕒 {item.hours || 1}h
+															</span>
+														</div>
+													</div>
+													<span class="text-gray-800 leading-relaxed font-medium pt-0.5">
+														{@html formatTaskText(item.text)}
+													</span>
+												</div>
+											{/each}
+										</div>
+
+										<!-- General Notes -->
+										{#if report.notes}
+											<div class="text-xs bg-gray-50 p-3 rounded-xl border border-gray-200 text-gray-600 leading-relaxed">
+												<strong class="text-gray-700">Notes:</strong> {report.notes}
+											</div>
+										{/if}
+
+										<!-- Attachment Link -->
+										{#if report.attachment}
+											<div class="flex items-center gap-2 text-xs bg-blue-50/50 p-2.5 rounded-xl border border-blue-100 text-blue-700">
+												<span class="material-symbols-outlined text-lg shrink-0">link</span>
+												<span class="font-semibold">Attachment:</span>
+												<a href={report.attachment} target="_blank" class="hover:underline truncate font-semibold">
+													{report.attachment}
+												</a>
+											</div>
+										{/if}
+									</div>
+								</div>
+							{:else}
+								<div class="flex items-center justify-between p-4 sm:p-5 rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 transition-colors hover:bg-gray-50 hover:border-gray-300">
+									<div class="flex items-center gap-3 opacity-60">
+										<div class="w-8 h-8 rounded-lg bg-gray-200 text-gray-500 flex items-center justify-center text-sm font-bold">
+											{employee.charAt(0).toUpperCase()}
+										</div>
+										<span class="font-bold text-sm sm:text-base text-gray-600">{employee}</span>
+									</div>
+									<span class="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-gray-400 bg-white border border-gray-200 px-2.5 py-1 rounded-md shadow-sm">Waiting</span>
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			</div>
+		</section>
 	</div>
 </main>
 
 <style>
-	/* Custom thin scrollbar for employees list board */
-	::-webkit-scrollbar {
-		width: 6px;
+	/* Custom Progress Bar styling */
+	.progress-bar-container {
+		height: 10px;
+		background-color: #f3f4f6; /* gray-100 */
+		border-radius: 999px;
+		overflow: hidden;
 	}
-	::-webkit-scrollbar-track {
-		background: transparent;
+	.progress-bar-fill {
+		height: 100%;
+		background-color: #22c55e;
+		border-radius: 999px;
 	}
-	::-webkit-scrollbar-thumb {
-		background: #000;
-		border: 1px solid #fff;
+	
+	@keyframes shimmer {
+		100% {
+			transform: translateX(100%);
+		}
+	}
+
+	/* Hide scrollbar for a cleaner look */
+	.scrollbar-hide::-webkit-scrollbar {
+		display: none;
+	}
+	.scrollbar-hide {
+		-ms-overflow-style: none;
+		scrollbar-width: none;
 	}
 </style>
