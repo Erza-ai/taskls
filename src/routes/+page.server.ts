@@ -11,7 +11,9 @@ import {
 	getTodayDateString,
 	getYesterdayDateString,
 	pokePendingEmployees,
-	importFromSheets
+	importFromSheets,
+	saveStore,
+	generateReportAISummary
 } from '$lib/server/store';
 
 export const load: PageServerLoad = async () => {
@@ -204,6 +206,41 @@ export const actions: Actions = {
 		} catch (error: any) {
 			console.error('Error importing from Google Sheets:', error);
 			return fail(500, { error: `Failed to import from Google Sheets: ${error.message}` });
+		}
+	},
+
+	generateSummaryForReport: async ({ request }) => {
+		const data = await request.formData();
+		const employee = data.get('employee') as string;
+		const dateStr = data.get('date') as string;
+
+		if (!employee || !dateStr) {
+			return fail(400, { error: 'Missing employee or date.' });
+		}
+
+		try {
+			const store = await getStore();
+			const report = store.submissions[employee]?.[dateStr];
+			if (!report) {
+				return fail(404, { error: 'Report not found.' });
+			}
+
+			const summary = await generateReportAISummary(report.tasks);
+			if (!summary) {
+				return fail(500, { error: 'Failed to generate summary.' });
+			}
+
+			report.aiSummary = summary;
+			await saveStore(store);
+
+			return {
+				success: true,
+				aiSummary: summary,
+				message: 'AI Summary successfully generated!'
+			};
+		} catch (error: any) {
+			console.error('Error in manual AI summary generation:', error);
+			return fail(500, { error: `Failed to generate AI summary: ${error.message}` });
 		}
 	}
 };

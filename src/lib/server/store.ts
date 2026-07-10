@@ -6,7 +6,7 @@ import { google } from 'googleapis';
 
 export interface TaskItem {
 	text: string;
-	status: 'Done' | 'Obstacle' | 'Carry Over';
+	status: 'Done' | 'Obstacle' | 'Carry Over' | 'Hold';
 	hours?: number;
 	priority?: 'Low' | 'Medium' | 'High';
 	project?: string;
@@ -19,6 +19,7 @@ export interface TaskReport {
 	tasks: TaskItem[];
 	submittedAt: string;
 	wellness: 'Good' | 'Tired' | 'Blocked';
+	aiSummary?: string;
 }
 
 export interface WeeklyStore {
@@ -124,7 +125,7 @@ export async function getStore(): Promise<WeeklyStore> {
 	return store;
 }
 
-async function saveStore(store: WeeklyStore): Promise<void> {
+export async function saveStore(store: WeeklyStore): Promise<void> {
 	await fs.mkdir(DATA_DIR, { recursive: true });
 	await fs.writeFile(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
 }
@@ -187,16 +188,16 @@ export async function appendReportToSheets(
 		// Read existing rows to clear previous submissions for today to avoid duplicates
 		const getRes = await sheets.spreadsheets.values.get({
 			spreadsheetId,
-			range: `${sheetName}!A:K`
+			range: `${sheetName}!A:J`
 		});
 		const rows = getRes.data.values || [];
 
 		const rowsToDelete: number[] = [];
 		for (let i = 0; i < rows.length; i++) {
 			const row = rows[i];
-			if (row && row.length > 2) {
-				const rowDateStr = row[1];
-				const rowName = row[2];
+			if (row && row.length > 1) {
+				const rowDateStr = row[0];
+				const rowName = row[1];
 
 				let datesMatch = false;
 				if (rowDateStr === todayStr) {
@@ -243,10 +244,8 @@ export async function appendReportToSheets(
 		}
 
 		// Prepare row values. Each task is a separate row.
-		// Columns: Timestamp, Date, Employee Name, Project, Task Description, Status, Hours, Priority, Notes, Attachment, Wellness
-		const timestamp = new Date().toISOString();
+		// Columns: Date, Employee Name, Project, Task Description, Status, Hours, Priority, Notes, Attachment, Wellness
 		const values = tasks.map((task) => [
-			timestamp,
 			todayStr,
 			employeeName,
 			task.project || 'General',
@@ -261,7 +260,7 @@ export async function appendReportToSheets(
 
 		await sheets.spreadsheets.values.append({
 			spreadsheetId,
-			range: `${sheetName}!A:K`,
+			range: `${sheetName}!A:J`,
 			valueInputOption: 'USER_ENTERED',
 			requestBody: {
 				values
@@ -286,11 +285,20 @@ export async function saveReport(
 		store.submissions[employeeName] = {};
 	}
 
+	let aiSummary: string | undefined = undefined;
+	try {
+		const summary = await generateReportAISummary(tasks);
+		if (summary) aiSummary = summary;
+	} catch (err) {
+		console.error('Failed to generate AI summary on submission:', err);
+	}
+
 	store.submissions[employeeName][dateStr] = {
 		employeeName,
 		tasks,
 		submittedAt: new Date().toISOString(),
-		wellness
+		wellness,
+		aiSummary
 	};
 
 	await saveStore(store);
@@ -331,6 +339,42 @@ function getOpenAIClient(): OpenAI | null {
 		apiKey,
 		baseURL: baseURL || undefined
 	});
+}
+
+export async function generateReportAISummary(tasks: TaskItem[]): Promise<string | null> {
+	const openai = getOpenAIClient();
+	if (!openai) {
+		console.warn('OpenAI SDK API key is missing. Skipping report AI summary.');
+		return null;
+	}
+
+	const model = env.AI_MODEL || process.env.AI_MODEL || 'gpt-4o-mini';
+	const tasksFormatted = tasks
+		.map((t) => `- [${t.status}] [Project: ${t.project || 'General'}] [Priority: ${t.priority || 'Medium'}] ${t.text.trim()} (Duration: ${t.hours || 1} hours)`)
+		.join('\n');
+
+	const prompt = `You are a project manager. Summarize the following daily tasks for this employee into a single, concise paragraph in English (maximum 2 sentences). Focus on what was achieved and if there are any obstacles. Do not include greetings or signatures:
+
+${tasksFormatted}`;
+
+	try {
+		const response = await openai.chat.completions.create({
+			model,
+			messages: [
+				{
+					role: 'system',
+					content: 'You are a professional project manager assistant that writes concise executive summaries.'
+				},
+				{ role: 'user', content: prompt }
+			],
+			temperature: 0.5
+		});
+
+		return response.choices[0]?.message?.content?.trim() || null;
+	} catch (error) {
+		console.error('Error generating single report AI summary:', error);
+		return null;
+	}
 }
 
 export async function generateAISummary(store: WeeklyStore, targetDate?: string): Promise<string | null> {
@@ -482,7 +526,6 @@ export async function pokePendingEmployees(targetDate?: string): Promise<boolean
 
 export function compileWeeklyCSV(store: WeeklyStore): string {
 	const headers = [
-		'Timestamp',
 		'Date',
 		'Employee Name',
 		'Project',
@@ -493,8 +536,6 @@ export function compileWeeklyCSV(store: WeeklyStore): string {
 		'Notes',
 		'Attachment',
 		'Wellness'
-		
-		
 	];
 	const rows = [headers.join(',')];
 
@@ -509,7 +550,6 @@ export function compileWeeklyCSV(store: WeeklyStore): string {
 				const escapedProject = `"${(task.project || 'General').replace(/"/g, '""')}"`;
 
 				const row = [
-					report.submittedAt,
 					dateStr,
 					employeeName,
 					escapedProject,
@@ -584,7 +624,8 @@ export async function sendDiscordWebhook(store: WeeklyStore, targetDate?: string
 	const statusEmoji = {
 		'Done': '✅',
 		'Obstacle': '⚠️',
-		'Carry Over': '⏩'
+		'Carry Over': '⏩',
+		'Hold': '⏸️'
 	};
 
 	let aiSummary: string | null = null;
@@ -847,7 +888,7 @@ export async function importFromSheets(): Promise<{ success: boolean; count: num
 
 	const getRes = await sheets.spreadsheets.values.get({
 		spreadsheetId,
-		range: `${sheetName}!A:K`
+		range: `${sheetName}!A:J`
 	});
 	const rows = getRes.data.values || [];
 
@@ -862,20 +903,19 @@ export async function importFromSheets(): Promise<{ success: boolean; count: num
 
 	for (let i = 1; i < rows.length; i++) {
 		const row = rows[i];
-		if (!row || row.length < 3) continue;
+		if (!row || row.length < 2) continue;
 
-		const timestamp = row[0] || new Date().toISOString();
-		const rawDateStr = row[1];
+		const rawDateStr = row[0];
 		const dateStr = normalizeDateStr(rawDateStr);
-		const employeeName = row[2];
-		const project = row[3] || 'General';
-		const taskText = row[4];
-		const status = (row[5] || 'Done') as 'Done' | 'Obstacle' | 'Carry Over';
-		const hours = Number(row[6]) || 1;
-		const priority = (row[7] || 'Medium') as 'Low' | 'Medium' | 'High';
-		const notes = row[8] || '';
-		const attachment = row[9] || '';
-		const wellness = (row[10] || 'Good') as 'Good' | 'Tired' | 'Blocked';
+		const employeeName = row[1];
+		const project = row[2] || 'General';
+		const taskText = row[3];
+		const status = (row[4] || 'Done') as 'Done' | 'Obstacle' | 'Carry Over' | 'Hold';
+		const hours = Number(row[5]) || 1;
+		const priority = (row[6] || 'Medium') as 'Low' | 'Medium' | 'High';
+		const notes = row[7] || '';
+		const attachment = row[8] || '';
+		const wellness = (row[9] || 'Good') as 'Good' | 'Tired' | 'Blocked';
 
 		if (!dateStr || !employeeName || !taskText) continue;
 
@@ -887,7 +927,7 @@ export async function importFromSheets(): Promise<{ success: boolean; count: num
 			store.submissions[employeeName][dateStr] = {
 				tasks: [],
 				wellness,
-				submittedAt: timestamp
+				submittedAt: new Date().toISOString()
 			};
 		}
 
