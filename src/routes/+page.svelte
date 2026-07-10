@@ -1068,6 +1068,52 @@
 			</div>
 		</section>
 	</div>
+
+	<!-- ADMIN / BACKUP UTILITIES -->
+	<footer class="mt-12 border-t border-gray-100 pt-6 pb-8 text-center" data-purpose="admin-footer">
+		<details class="group max-w-md mx-auto">
+			<summary class="text-xs font-bold text-gray-400 hover:text-gray-600 transition-colors cursor-pointer select-none outline-none list-none flex items-center justify-center gap-1">
+				<span class="material-symbols-outlined text-[16px] transition-transform duration-200 group-open:rotate-180">expand_more</span>
+				Database Maintenance Utilities
+			</summary>
+			<div class="mt-4 p-5 bg-gray-50 border border-gray-200 rounded-2xl text-left space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+				<h4 class="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-1.5">
+					<span class="material-symbols-outlined text-[18px] text-gray-400">database</span>
+					Backup & Restore
+				</h4>
+				<p class="text-[11px] text-gray-500 font-medium leading-relaxed">
+					Download a snapshot of the current local database file to your computer, or restore a previously saved backup file.
+				</p>
+				<div class="flex flex-col sm:flex-row gap-3.5 pt-2">
+					<a
+						href="/download-json"
+						download="store-backup.json"
+						class="flex-1 bg-white hover:bg-gray-100 border border-gray-200 text-gray-700 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm active:scale-95 select-none"
+					>
+						<span class="material-symbols-outlined text-[16px]">download</span> Download Backup
+					</a>
+					<form method="POST" action="?/restoreBackup" enctype="multipart/form-data" use:enhance class="flex-1">
+						<label class="w-full bg-[#1a1a1a] hover:bg-black text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm active:scale-95 cursor-pointer select-none">
+							<span class="material-symbols-outlined text-[16px]">upload</span> Restore Backup
+							<input
+								type="file"
+								name="backupFile"
+								accept=".json"
+								required
+								class="hidden"
+								onchange={(e) => {
+									const form = e.currentTarget.form;
+									if (form && confirm('Are you sure you want to overwrite the current database with this backup file?')) {
+										form.requestSubmit();
+									}
+								}}
+							/>
+						</label>
+					</form>
+				</div>
+			</div>
+		</details>
+	</footer>
 </main>
 
 <style>

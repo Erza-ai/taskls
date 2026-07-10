@@ -156,5 +156,40 @@ export const actions: Actions = {
 				error: 'Internal server error occurred while sending reminder.'
 			});
 		}
+	},
+
+	restoreBackup: async ({ request }) => {
+		const data = await request.formData();
+		const file = data.get('backupFile') as File;
+
+		if (!file || file.size === 0) {
+			return fail(400, { error: 'No backup file selected.' });
+		}
+
+		try {
+			const text = await file.text();
+			const parsed = JSON.parse(text);
+
+			// Basic validation check to ensure it's a WeeklyStore schema
+			if (!parsed.submissions || !parsed.discordSent) {
+				return fail(400, { error: 'Invalid backup file format.' });
+			}
+
+			// Write to the store file
+			const DATA_DIR = path.resolve('data');
+			const DATA_FILE = path.join(DATA_DIR, 'store.json');
+			
+			// Ensure directory exists
+			await fs.mkdir(DATA_DIR, { recursive: true });
+			await fs.writeFile(DATA_FILE, JSON.stringify(parsed, null, 2), 'utf-8');
+
+			return {
+				success: true,
+				message: 'Database backup successfully restored!'
+			};
+		} catch (error: any) {
+			console.error('Error restoring database backup:', error);
+			return fail(500, { error: `Failed to restore backup: ${error.message}` });
+		}
 	}
 };
