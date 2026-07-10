@@ -15,7 +15,7 @@
 	let selectedEmployee = $state('');
 	let tasks = $state<Array<{
 		text: string;
-		status: 'Done' | 'Obstacle' | 'Carry Over';
+		status: 'Done' | 'Obstacle' | 'Carry Over' | 'Hold';
 		hours: number;
 		priority: 'Low' | 'Medium' | 'High';
 		project: string;
@@ -313,18 +313,19 @@
 	});
 
 	let statusCounts = $derived.by(() => {
-		let done = 0, obstacle = 0, carryOver = 0;
+		let done = 0, obstacle = 0, carryOver = 0, hold = 0;
 		activeSubmissionsList.forEach((report: any) => {
 			(report.tasks || []).forEach((t: any) => {
 				if (t.status === 'Done') done++;
 				else if (t.status === 'Obstacle') obstacle++;
 				else if (t.status === 'Carry Over') carryOver++;
+				else if (t.status === 'Hold') hold++;
 			});
 		});
-		return { done, obstacle, carryOver };
+		return { done, obstacle, carryOver, hold };
 	});
 
-	let totalTasks = $derived(statusCounts.done + statusCounts.obstacle + statusCounts.carryOver);
+	let totalTasks = $derived(statusCounts.done + statusCounts.obstacle + statusCounts.carryOver + statusCounts.hold);
 
 	// Display employees filtered by search query and status tab
 	let displayEmployees = $derived(
@@ -351,7 +352,8 @@
 	const statusConfig = {
 		'Done': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-[#1a1a1a] text-white border-[#1a1a1a] shadow-md', icon: 'check_circle', text: 'Done' },
 		'Obstacle': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-red-500 text-white border-red-500 shadow-md', icon: 'warning', text: 'Obstacle' },
-		'Carry Over': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-amber-500 text-white border-amber-500 shadow-md', icon: 'forward', text: 'Carry Over' }
+		'Carry Over': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-amber-500 text-white border-amber-500 shadow-md', icon: 'forward', text: 'Carry Over' },
+		'Hold': { bg: 'bg-gray-100 hover:bg-gray-200/80 text-gray-700 border-transparent', active: 'bg-blue-500 text-white border-blue-500 shadow-md', icon: 'pause_circle', text: 'Hold' }
 	};
 
 	// Ticket link parser (Jira and GitHub)
@@ -489,11 +491,12 @@
 						<div class="bg-green-500 h-full" style="width: {(statusCounts.done / totalTasks) * 100}%" title="Done: {statusCounts.done}"></div>
 						<div class="bg-red-500 h-full" style="width: {(statusCounts.obstacle / totalTasks) * 100}%" title="Obstacle: {statusCounts.obstacle}"></div>
 						<div class="bg-amber-500 h-full" style="width: {(statusCounts.carryOver / totalTasks) * 100}%" title="Carry Over: {statusCounts.carryOver}"></div>
+						<div class="bg-blue-500 h-full" style="width: {(statusCounts.hold / totalTasks) * 100}%" title="Hold: {statusCounts.hold}"></div>
 					{:else}
 						<div class="bg-gray-200 w-full h-full"></div>
 					{/if}
 				</div>
-				<div class="flex items-center gap-3 text-[10px] font-bold text-gray-500">
+				<div class="flex flex-wrap items-center gap-3 text-[10px] font-bold text-gray-500">
 					<span class="flex items-center gap-1">
 						<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> Done: {statusCounts.done}
 					</span>
@@ -502,6 +505,9 @@
 					</span>
 					<span class="flex items-center gap-1">
 						<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Carry Over: {statusCounts.carryOver}
+					</span>
+					<span class="flex items-center gap-1">
+						<span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Hold: {statusCounts.hold}
 					</span>
 				</div>
 			</div>
@@ -728,7 +734,7 @@
 									id="task-text-{index}"
 									bind:value={task.text}
 									onpaste={(e: ClipboardEvent) => handlePaste(e, index)}
-									required
+									
 									class="w-full form-textarea bg-white border border-gray-200 rounded-xl p-4 text-sm font-medium text-gray-800 min-h-[100px] resize-y focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none transition-all placeholder:text-gray-400 shadow-sm"
 									placeholder="Enter task description (paste git log to auto-split)..."
 								></textarea>
@@ -742,7 +748,6 @@
 											type="text"
 											bind:value={task.project}
 											placeholder="e.g. AWBS, Internal"
-											required
 											class="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 focus:border-gray-900 outline-none transition-all shadow-sm"
 										/>
 									</div>
@@ -755,7 +760,6 @@
 											min="0.5"
 											max="24"
 											bind:value={task.hours}
-											required
 											class="w-full bg-white border border-gray-200 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-800 focus:border-gray-900 outline-none transition-all shadow-sm"
 										/>
 									</div>
@@ -960,7 +964,7 @@
 						/>
 					</div>
 					<div class="flex gap-1.5 overflow-x-auto scrollbar-hide">
-						{#each ['All', 'Done', 'Obstacle', 'Carry Over'] as filter}
+						{#each ['All', 'Done', 'Obstacle', 'Carry Over', 'Hold'] as filter}
 							<button
 								type="button"
 								onclick={() => statusFilter = filter}
@@ -1063,6 +1067,37 @@
 													</div>
 												</div>
 											{/each}
+										</div>
+
+										<!-- AI Summary Section -->
+										<div class="mt-4 p-3 bg-indigo-50/50 border border-indigo-100/80 rounded-xl space-y-2">
+											<div class="flex items-center justify-between">
+												<span class="text-xs font-bold text-indigo-700 flex items-center gap-1.5">
+													<span class="material-symbols-outlined text-[16px] text-indigo-500 animate-pulse">blur_on</span>
+													AI Summary
+												</span>
+												{#if !report.aiSummary}
+													<form method="POST" action="?/generateSummaryForReport" use:enhance class="inline-block">
+														<input type="hidden" name="employee" value={employee} />
+														<input type="hidden" name="date" value={activeDate} />
+														<button
+															type="submit"
+															class="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1 bg-indigo-100/50 hover:bg-indigo-100 px-2.5 py-1 rounded-md"
+														>
+															<span class="material-symbols-outlined text-[12px]">auto_awesome</span> Generate
+														</button>
+													</form>
+												{/if}
+											</div>
+											{#if report.aiSummary}
+												<p class="text-[11px] sm:text-xs text-indigo-900 font-medium leading-relaxed italic">
+													"{report.aiSummary}"
+												</p>
+											{:else}
+												<p class="text-[11px] text-gray-400 font-semibold italic">
+													No summary generated yet. Click generate to summarize this report with AI.
+												</p>
+											{/if}
 										</div>
 									</div>
 								</div>
