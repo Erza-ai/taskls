@@ -28,6 +28,8 @@
 
 	// Active date tab selection (defaults to today)
 	let activeDate = $state(data.todayDate);
+	let targetDate = $state(data.todayDate);
+	let showDatePicker = $state(false);
 
 	// Search & Status filters
 	let searchQuery = $state('');
@@ -169,18 +171,20 @@
 		closeAndFocusTrigger();
 	}
 
-	// Track the last employee we loaded data for — prevents re-running on polling refresh
-	let lastLoadedEmployee = $state('');
+	// Track the last employee & date we loaded data for — prevents re-running on polling refresh
+	let lastLoadedKey = $state('');
 
-	// Auto-load existing report data only when the selected employee CHANGES
+	// Auto-load existing report data only when the selected employee or date CHANGES
 	$effect(() => {
 		const employee = selectedEmployee; // track reactive dependency
+		const dateStr = targetDate;       // track reactive dependency
+		const currentKey = `${employee}_${dateStr}`;
 
-		if (employee === lastLoadedEmployee) return; // skip if employee didn't change (e.g. data polling refresh)
-		lastLoadedEmployee = employee;
+		if (currentKey === lastLoadedKey) return; // skip if didn't change (e.g. data polling refresh)
+		lastLoadedKey = currentKey;
 
 		if (employee) {
-			const report = data.submissions[employee]?.[data.todayDate];
+			const report = data.submissions[employee]?.[dateStr];
 			if (report) {
 				tasks = JSON.parse(JSON.stringify(report.tasks)).map((t: any) => ({
 					...t,
@@ -202,7 +206,9 @@
 		if (form?.success) {
 			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' }];
 			selectedEmployee = '';
-			lastLoadedEmployee = ''; // reset guard so the same employee can reload fresh data next time
+			lastLoadedKey = ''; // reset guard so the same employee can reload fresh data next time
+			targetDate = data.todayDate;
+			showDatePicker = false;
 			wellness = 'Good';
 		}
 	});
@@ -304,9 +310,9 @@
 		return escaped;
 	}
 
-	let hasUserSubmittedToday = $derived.by(() => {
+	let hasUserSubmittedForTargetDate = $derived.by(() => {
 		if (!selectedEmployee) return false;
-		return data.submissions[selectedEmployee]?.[data.todayDate] !== undefined;
+		return data.submissions[selectedEmployee]?.[targetDate] !== undefined;
 	});
 </script>
 
@@ -378,7 +384,7 @@
 					<span class="material-symbols-outlined text-gray-700">edit_document</span>
 				</div>
 				<h2 class="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">
-					{hasUserSubmittedToday ? 'Update Daily Report' : 'Fill Daily Report'}
+					{hasUserSubmittedForTargetDate ? 'Update Daily Report' : 'Fill Daily Report'}
 				</h2>
 			</div>
 			
@@ -423,20 +429,22 @@
 							<Command.Root class="bg-transparent">
 								<div class="flex items-center px-3 border-b border-gray-100 pb-1">
 									<span class="material-symbols-outlined text-gray-400 text-lg mr-2">search</span>
-									<Command.Input placeholder="Search employee..." class="border-none focus:ring-0 text-sm h-11 px-0 py-3 w-full outline-none placeholder:text-gray-400" />
+									<input
+										type="text"
+										placeholder="Search employee..."
+										bind:value={employeeSearchQuery}
+										class="w-full bg-transparent py-3 text-sm font-semibold text-gray-800 outline-none placeholder:text-gray-400"
+									/>
 								</div>
-								<Command.List class="max-h-[250px] overflow-y-auto scrollbar-hide py-1">
-									<Command.Empty class="py-6 text-center text-sm font-medium text-gray-500">No employee found.</Command.Empty>
+								<Command.List class="max-h-[200px] overflow-y-auto p-1">
+									<Command.Empty class="p-3 text-xs text-gray-400 font-semibold text-center">No employee found.</Command.Empty>
 									<Command.Group>
-										{#each filteredEmployees as employee (employee)}
-											{@const hasSubmitted = data.submissions[employee]?.[data.todayDate] !== undefined}
+										{#each filteredEmployees as employee}
+											{@const hasSubmitted = data.submissions[employee]?.[targetDate] !== undefined}
 											<Command.Item
 												value={employee}
 												onSelect={() => selectEmployee(employee)}
-												class={cn(
-													"py-3 px-3 mx-1 my-0.5 rounded-lg cursor-pointer text-sm font-semibold text-gray-700 transition-colors flex items-center justify-between",
-													'hover:bg-gray-100 aria-selected:bg-gray-100 aria-selected:text-gray-900'
-												)}
+												class="py-3 px-3 mx-1 my-0.5 rounded-lg cursor-pointer text-sm font-semibold text-gray-700 transition-colors flex items-center justify-between hover:bg-gray-100 aria-selected:bg-gray-100 aria-selected:text-gray-900"
 											>
 												{employee}
 												{#if hasSubmitted}
@@ -451,6 +459,68 @@
 							</Command.Root>
 						</Popover.Content>
 					</Popover.Root>
+				</div>
+
+				<!-- Submission Date Toggle -->
+				<div class="space-y-2.5">
+					<span class="block text-sm font-semibold text-gray-700">Submission Date</span>
+					<div class="grid grid-cols-3 gap-2">
+						<button
+							type="button"
+							onclick={() => { targetDate = data.todayDate; showDatePicker = false; }}
+							class="py-2.5 px-2 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-0.5 border select-none transition-all active:scale-95 shadow-sm"
+							class:bg-black={targetDate === data.todayDate && !showDatePicker}
+							class:border-black={targetDate === data.todayDate && !showDatePicker}
+							class:text-white={targetDate === data.todayDate && !showDatePicker}
+							class:bg-gray-50={targetDate !== data.todayDate || showDatePicker}
+							class:border-gray-200={targetDate !== data.todayDate || showDatePicker}
+							class:text-gray-700={targetDate !== data.todayDate || showDatePicker}
+						>
+							<span>📅 Today</span>
+							<span class="text-[9px] font-medium opacity-80">{data.todayDateFormatted}</span>
+						</button>
+						<button
+							type="button"
+							onclick={() => { targetDate = data.yesterdayDate; showDatePicker = false; }}
+							class="py-2.5 px-2 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-0.5 border select-none transition-all active:scale-95 shadow-sm"
+							class:bg-black={targetDate === data.yesterdayDate && !showDatePicker}
+							class:border-black={targetDate === data.yesterdayDate && !showDatePicker}
+							class:text-white={targetDate === data.yesterdayDate && !showDatePicker}
+							class:bg-gray-50={targetDate !== data.yesterdayDate || showDatePicker}
+							class:border-gray-200={targetDate !== data.yesterdayDate || showDatePicker}
+							class:text-gray-700={targetDate !== data.yesterdayDate || showDatePicker}
+						>
+							<span>📅 Yesterday</span>
+							<span class="text-[9px] font-medium opacity-80">{data.yesterdayDateFormatted}</span>
+						</button>
+						<button
+							type="button"
+							onclick={() => showDatePicker = true}
+							class="py-2.5 px-2 rounded-xl text-xs font-bold flex flex-col items-center justify-center gap-0.5 border select-none transition-all active:scale-95 shadow-sm"
+							class:bg-black={showDatePicker}
+							class:border-black={showDatePicker}
+							class:text-white={showDatePicker}
+							class:bg-gray-50={!showDatePicker}
+							class:border-gray-200={!showDatePicker}
+							class:text-gray-700={!showDatePicker}
+						>
+							<span>📅 Custom...</span>
+							<span class="text-[9px] font-medium opacity-80">Pick Date</span>
+						</button>
+					</div>
+
+					{#if showDatePicker}
+						<div in:slide={{ duration: 250 }} class="mt-2.5 relative">
+							<input
+								id="custom-date-picker"
+								type="date"
+								bind:value={targetDate}
+								required
+								class="w-full bg-white border border-gray-200 rounded-xl px-4 py-3 text-sm font-semibold text-gray-800 focus:border-gray-900 outline-none transition-all shadow-sm"
+							/>
+						</div>
+					{/if}
+					<input type="hidden" name="targetDate" value={targetDate} />
 				</div>
 
 				<!-- Wellness Check-in -->
@@ -604,7 +674,7 @@
 						<span>Submitting...</span>
 					{:else}
 						<span class="material-symbols-outlined text-xl">send</span>
-						<span>{hasUserSubmittedToday ? 'Update Daily Report' : 'Submit Daily Report'}</span>
+						<span>{hasUserSubmittedForTargetDate ? 'Update Daily Report' : 'Submit Daily Report'}</span>
 					{/if}
 				</button>
 			</form>
@@ -624,6 +694,7 @@
 				<div class="flex items-center gap-2">
 					<!-- Poke Pending Form Button -->
 					<form method="POST" action="?/pokePending" use:enhance>
+						<input type="hidden" name="targetDate" value={activeDate} />
 						<button type="submit" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition-colors shadow-sm select-none active:scale-95" title="Remind pending team members on Discord">
 							<span class="material-symbols-outlined text-[16px]">notifications_active</span> Poke Pending
 						</button>
