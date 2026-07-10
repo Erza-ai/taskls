@@ -10,7 +10,8 @@ import {
 	formatIndonesianDate,
 	getTodayDateString,
 	getYesterdayDateString,
-	pokePendingEmployees
+	pokePendingEmployees,
+	importFromSheets
 } from '$lib/server/store';
 
 export const load: PageServerLoad = async () => {
@@ -190,6 +191,19 @@ export const actions: Actions = {
 		} catch (error: any) {
 			console.error('Error restoring database backup:', error);
 			return fail(500, { error: `Failed to restore backup: ${error.message}` });
+		}
+	},
+
+	importFromSheets: async () => {
+		try {
+			const res = await importFromSheets();
+			return {
+				success: true,
+				message: res.message
+			};
+		} catch (error: any) {
+			console.error('Error importing from Google Sheets:', error);
+			return fail(500, { error: `Failed to import from Google Sheets: ${error.message}` });
 		}
 	}
 };
