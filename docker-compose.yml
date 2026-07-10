@@ -7,8 +7,8 @@ services:
     ports:
       - "${APP_PORT:-3000}:3000"
     volumes:
-      # Persists daily submissions JSON database on the host machine
-      - ./data:/app/data
+      # Persists daily submissions JSON database in a named Docker volume
+      - taskls-data:/app/data
     environment:
       - EMPLOYEES=${EMPLOYEES:-Ahmad Fauzi,Budi Santoso,Citra Lestari,Dewi Sartika,Eko Prasetyo}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
@@ -19,3 +19,6 @@ services:
       - GOOGLE_SERVICE_ACCOUNT_KEY=${GOOGLE_SERVICE_ACCOUNT_KEY:-}
       - NODE_ENV=${APP_ENV:-production}
     restart: unless-stopped
+
+volumes:
+  taskls-data:
