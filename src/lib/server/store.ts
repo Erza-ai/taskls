@@ -333,7 +333,7 @@ function getOpenAIClient(): OpenAI | null {
 	});
 }
 
-export async function generateAISummary(store: WeeklyStore): Promise<string | null> {
+export async function generateAISummary(store: WeeklyStore, targetDate?: string): Promise<string | null> {
 	const openai = getOpenAIClient();
 	if (!openai) {
 		console.warn('OpenAI SDK API key is missing. Skipping AI summarization.');
@@ -342,11 +342,11 @@ export async function generateAISummary(store: WeeklyStore): Promise<string | nu
 
 	const model = env.AI_MODEL || process.env.AI_MODEL || 'gpt-4o-mini';
 	const employees = getEmployeesList();
-	const today = getTodayDateString();
+	const dateStr = targetDate || getTodayDateString();
 
 	const reportList = employees
 		.map((name) => {
-			const report = store.submissions[name]?.[today];
+			const report = store.submissions[name]?.[dateStr];
 			if (report) {
 				const tasksFormatted = report.tasks
 					.map((t) => `- [${t.status}] [Project: ${t.project || 'General'}] [Priority: ${t.priority || 'Medium'}] ${t.text.trim()} (Duration: ${t.hours || 1} hours)`)
@@ -564,19 +564,19 @@ export async function sendWeeklyDiscordCSV(store: WeeklyStore): Promise<boolean>
 	}
 }
 
-export async function sendDiscordWebhook(store: WeeklyStore): Promise<boolean> {
+export async function sendDiscordWebhook(store: WeeklyStore, targetDate?: string): Promise<boolean> {
 	const webhookUrl = env.DISCORD_WEBHOOK_URL || process.env.DISCORD_WEBHOOK_URL;
 	if (!webhookUrl || webhookUrl.includes('dummy-id') || webhookUrl === '') {
 		console.warn('Discord Webhook URL is not configured or is a dummy. Skipping webhook call.');
 		return false;
 	}
 
-	const today = getTodayDateString();
+	const dateStr = targetDate || getTodayDateString();
 	const employees = getEmployeesList();
 
 	let submissionsCount = 0;
 	for (const name of employees) {
-		if (store.submissions[name] && store.submissions[name][today]) {
+		if (store.submissions[name] && store.submissions[name][dateStr]) {
 			submissionsCount++;
 		}
 	}
@@ -589,7 +589,7 @@ export async function sendDiscordWebhook(store: WeeklyStore): Promise<boolean> {
 
 	let aiSummary: string | null = null;
 	try {
-		aiSummary = await generateAISummary(store);
+		aiSummary = await generateAISummary(store, dateStr);
 	} catch (error) {
 		console.error('Graceful failure during AI Summary generation:', error);
 	}
@@ -597,7 +597,7 @@ export async function sendDiscordWebhook(store: WeeklyStore): Promise<boolean> {
 	const fields = [];
 
 	for (const name of employees) {
-		const report = store.submissions[name]?.[today];
+		const report = store.submissions[name]?.[dateStr];
 		if (report) {
 			let tasksFormatted = report.tasks
 				.map((t) => {
@@ -629,7 +629,7 @@ export async function sendDiscordWebhook(store: WeeklyStore): Promise<boolean> {
 	}
 
 	const embeds: any[] = [];
-	const todayFormatted = formatIndonesianDate(today);
+	const todayFormatted = formatIndonesianDate(dateStr);
 
 	if (aiSummary) {
 		embeds.push({
@@ -686,12 +686,12 @@ export async function sendDiscordWebhook(store: WeeklyStore): Promise<boolean> {
 	}
 }
 
-export async function checkAndSendToDiscord(): Promise<{ sent: boolean; message: string }> {
+export async function checkAndSendToDiscord(targetDate?: string): Promise<{ sent: boolean; message: string }> {
 	const store = await getStore();
-	const today = getTodayDateString();
+	const dateStr = targetDate || getTodayDateString();
 
-	if (store.discordSent[today]) {
-		return { sent: false, message: 'Today\'s report has already been sent to Discord.' };
+	if (store.discordSent[dateStr]) {
+		return { sent: false, message: `Report for ${dateStr} has already been sent to Discord.` };
 	}
 
 	const employees = getEmployeesList();
@@ -699,14 +699,14 @@ export async function checkAndSendToDiscord(): Promise<{ sent: boolean; message:
 		return { sent: false, message: 'No employees configured.' };
 	}
 
-	const hasAllSubmitted = employees.every((name) => store.submissions[name]?.[today] !== undefined);
+	const hasAllSubmitted = employees.every((name) => store.submissions[name]?.[dateStr] !== undefined);
 	if (!hasAllSubmitted) {
 		return { sent: false, message: 'Not all employees have submitted their report.' };
 	}
 
-	const success = await sendDiscordWebhook(store);
+	const success = await sendDiscordWebhook(store, dateStr);
 	if (success) {
-		store.discordSent[today] = true;
+		store.discordSent[dateStr] = true;
 		await saveStore(store);
 		return { sent: true, message: 'Report successfully sent to Discord!' };
 	} else {

@@ -117,8 +117,8 @@ export const actions: Actions = {
 			// Save the report
 			await saveReport(employeeName, tasks as any, wellness, targetDate);
 
-			// Check if all employees have submitted today, send webhook asynchronously in background
-			checkAndSendToDiscord().catch((error) => {
+			// Check if all employees have submitted, send webhook asynchronously in background
+			checkAndSendToDiscord(targetDate).catch((error) => {
 				console.error('Async error in checkAndSendToDiscord:', error);
 			});
 
