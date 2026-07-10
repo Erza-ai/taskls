@@ -742,3 +742,116 @@ export function formatIndonesianDate(dateStr: string): string {
 
 	return `${dayName}, ${parseInt(day, 10)} ${months[monthIdx]} ${year}`;
 }
+
+export async function importFromSheets(): Promise<{ success: boolean; count: number; message: string }> {
+	const spreadsheetId = env.GOOGLE_SPREADSHEET_ID || process.env.GOOGLE_SPREADSHEET_ID;
+	if (!spreadsheetId) {
+		throw new Error('GOOGLE_SPREADSHEET_ID is missing.');
+	}
+
+	let credentials;
+	const envKey = env.GOOGLE_SERVICE_ACCOUNT_KEY || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+	if (envKey) {
+		try {
+			credentials = JSON.parse(envKey.trim());
+		} catch (err) {
+			console.error('Invalid GOOGLE_SERVICE_ACCOUNT_KEY JSON string:', err);
+		}
+	}
+
+	if (!credentials) {
+		const keyFile = path.join(path.resolve('data'), 'google-key.json');
+		try {
+			const keyContent = await fs.readFile(keyFile, 'utf-8');
+			credentials = JSON.parse(keyContent);
+		} catch (err) {
+			throw new Error('Google service account credentials not found.');
+		}
+	}
+
+	if (credentials && typeof credentials.private_key === 'string') {
+		credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
+	}
+
+	const auth = new google.auth.GoogleAuth({
+		credentials,
+		scopes: ['https://www.googleapis.com/auth/spreadsheets']
+	});
+
+	const sheets = google.sheets({ version: 'v4', auth });
+
+	const spreadsheetInfo = await sheets.spreadsheets.get({ spreadsheetId });
+	let sheet = spreadsheetInfo.data.sheets?.find((s) => s.properties?.title === 'Erza-Report');
+	if (!sheet) {
+		sheet = spreadsheetInfo.data.sheets?.find((s) => s.properties?.title === 'Sheet1') || spreadsheetInfo.data.sheets?.[0];
+	}
+	const sheetName = sheet?.properties?.title || 'Sheet1';
+
+	const getRes = await sheets.spreadsheets.values.get({
+		spreadsheetId,
+		range: `${sheetName}!A:K`
+	});
+	const rows = getRes.data.values || [];
+
+	if (rows.length <= 1) {
+		return { success: true, count: 0, message: 'Google Sheet is empty.' };
+	}
+
+	// Reconstruct the store object
+	const store = await getStore();
+	store.submissions = {};
+
+	let importCount = 0;
+
+	for (let i = 1; i < rows.length; i++) {
+		const row = rows[i];
+		if (!row || row.length < 3) continue;
+
+		const timestamp = row[0] || new Date().toISOString();
+		const dateStr = row[1];
+		const employeeName = row[2];
+		const project = row[3] || 'General';
+		const taskText = row[4];
+		const status = (row[5] || 'Done') as 'Done' | 'Obstacle' | 'Carry Over';
+		const hours = Number(row[6]) || 1;
+		const priority = (row[7] || 'Medium') as 'Low' | 'Medium' | 'High';
+		const notes = row[8] || '';
+		const attachment = row[9] || '';
+		const wellness = (row[10] || 'Good') as 'Good' | 'Tired' | 'Blocked';
+
+		if (!dateStr || !employeeName || !taskText) continue;
+
+		if (!store.submissions[employeeName]) {
+			store.submissions[employeeName] = {};
+		}
+
+		if (!store.submissions[employeeName][dateStr]) {
+			store.submissions[employeeName][dateStr] = {
+				tasks: [],
+				wellness,
+				submittedAt: timestamp
+			};
+		}
+
+		const report = store.submissions[employeeName][dateStr];
+		const taskExists = report.tasks.some(
+			(t) => t.text === taskText && t.project === project && t.status === status
+		);
+
+		if (!taskExists) {
+			report.tasks.push({
+				text: taskText,
+				status,
+				hours,
+				priority,
+				project,
+				notes,
+				attachment
+			});
+			importCount++;
+		}
+	}
+
+	await saveStore(store);
+	return { success: true, count: importCount, message: `Successfully imported ${importCount} tasks from Google Sheets!` };
+}

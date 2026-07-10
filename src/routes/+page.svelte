@@ -1082,18 +1082,18 @@
 					Backup & Restore
 				</h4>
 				<p class="text-[11px] text-gray-500 font-medium leading-relaxed">
-					Download a snapshot of the current local database file to your computer, or restore a previously saved backup file.
+					Download a snapshot of the current local database file to your computer, restore a previously saved backup file, or rebuild your entire local database from Google Sheets.
 				</p>
-				<div class="flex flex-col sm:flex-row gap-3.5 pt-2">
+				<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
 					<a
 						href="/download-json"
 						download="store-backup.json"
-						class="flex-1 bg-white hover:bg-gray-100 border border-gray-200 text-gray-700 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm active:scale-95 select-none"
+						class="w-full bg-white hover:bg-gray-100 border border-gray-200 text-gray-700 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 select-none"
 					>
 						<span class="material-symbols-outlined text-[16px]">download</span> Download Backup
 					</a>
-					<form method="POST" action="?/restoreBackup" enctype="multipart/form-data" use:enhance class="flex-1">
-						<label class="w-full bg-[#1a1a1a] hover:bg-black text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm active:scale-95 cursor-pointer select-none">
+					<form method="POST" action="?/restoreBackup" enctype="multipart/form-data" use:enhance class="w-full">
+						<label class="w-full bg-white hover:bg-gray-100 border border-gray-200 text-gray-700 font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer select-none">
 							<span class="material-symbols-outlined text-[16px]">upload</span> Restore Backup
 							<input
 								type="file"
@@ -1109,6 +1109,19 @@
 								}}
 							/>
 						</label>
+					</form>
+					<form method="POST" action="?/importFromSheets" use:enhance class="w-full">
+						<button
+							type="submit"
+							class="w-full bg-[#1a1a1a] hover:bg-black text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 select-none"
+							onclick={(e) => {
+								if (!confirm('Are you sure you want to pull and rebuild your entire local database from your Google Sheets tab?')) {
+									e.preventDefault();
+								}
+							}}
+						>
+							<span class="material-symbols-outlined text-[16px]">sync</span> Sync from Sheets
+						</button>
 					</form>
 				</div>
 			</div>
