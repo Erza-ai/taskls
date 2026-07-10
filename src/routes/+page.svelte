@@ -296,6 +296,36 @@
 		totalEmployees > 0 ? Math.round((submittedCount / totalEmployees) * 100) : 0
 	);
 
+	let totalHours = $derived(
+		activeSubmissionsList.reduce((acc: number, report: any) => {
+			return acc + (report.tasks || []).reduce((tAcc: number, t: any) => tAcc + (t.hours || 1), 0);
+		}, 0)
+	);
+
+	let wellnessCounts = $derived.by(() => {
+		let good = 0, tired = 0, blocked = 0;
+		activeSubmissionsList.forEach((report: any) => {
+			if (report.wellness === 'Good') good++;
+			else if (report.wellness === 'Tired') tired++;
+			else if (report.wellness === 'Blocked') blocked++;
+		});
+		return { good, tired, blocked };
+	});
+
+	let statusCounts = $derived.by(() => {
+		let done = 0, obstacle = 0, carryOver = 0;
+		activeSubmissionsList.forEach((report: any) => {
+			(report.tasks || []).forEach((t: any) => {
+				if (t.status === 'Done') done++;
+				else if (t.status === 'Obstacle') obstacle++;
+				else if (t.status === 'Carry Over') carryOver++;
+			});
+		});
+		return { done, obstacle, carryOver };
+	});
+
+	let totalTasks = $derived(statusCounts.done + statusCounts.obstacle + statusCounts.carryOver);
+
 	// Display employees filtered by search query and status tab
 	let displayEmployees = $derived(
 		data.employees.filter((employee: string) => {
@@ -349,6 +379,12 @@
 		return escaped;
 	}
 
+	function formatDateForDisplay(dateStr: string): string {
+		const d = new Date(dateStr);
+		if (isNaN(d.getTime())) return dateStr;
+		return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+	}
+
 	let hasUserSubmittedForTargetDate = $derived.by(() => {
 		if (!selectedEmployee) return false;
 		return data.submissions[selectedEmployee]?.[targetDate] !== undefined;
@@ -375,27 +411,87 @@
 		<p class="text-gray-500 text-sm md:text-base font-medium max-w-xl">Collective Weekly Employee Reports synced with Google Sheets & Discord Webhook.</p>
 	</header>
 
-	<!-- PROGRESS CARD -->
-	<section class="bg-white rounded-2xl p-5 sm:p-6 custom-shadow border border-gray-100/50 transition-transform duration-300 hover:shadow-lg" data-purpose="submission-progress">
-		<div class="flex items-center justify-between mb-4">
-			<h2 class="text-[10px] sm:text-xs font-bold text-gray-800 tracking-wider uppercase flex items-center gap-2">
-				<span class="material-symbols-outlined text-lg text-gray-400">monitoring</span>
-				Submission Progress
-			</h2>
-			<span class="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-md">{percentProgress}% COMPLETED</span>
-		</div>
-		<div class="progress-bar-container mb-4 shadow-inner">
-			<div class="progress-bar-fill transition-all duration-700 ease-out relative overflow-hidden" style="width: {percentProgress}%;">
-				<div class="absolute inset-0 bg-white/20 w-full animate-[shimmer_2s_infinite]"></div>
+	<!-- TOP DASHBOARD STATS GRID -->
+	<div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
+		<!-- PROGRESS CARD -->
+		<section class="bg-white rounded-2xl p-5 sm:p-6 custom-shadow border border-gray-100/50 transition-transform duration-300 hover:shadow-lg flex flex-col justify-between" data-purpose="submission-progress">
+			<div class="flex items-center justify-between mb-4">
+				<h2 class="text-[10px] sm:text-xs font-bold text-gray-800 tracking-wider uppercase flex items-center gap-2">
+					<span class="material-symbols-outlined text-lg text-gray-400">monitoring</span>
+					Submission Progress ({formatDateForDisplay(activeDate)})
+				</h2>
+				<span class="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-1 rounded-md">{percentProgress}% COMPLETED</span>
 			</div>
-		</div>
-		<div class="flex justify-between text-sm font-bold">
-			<span class="text-gray-900 flex items-center gap-1.5">
-				<span class="material-symbols-outlined text-[16px] text-gray-400">group</span>
-				{submittedCount} <span class="text-gray-400 font-medium px-1">of</span> {totalEmployees} <span class="hidden sm:inline font-medium text-gray-400">Employees</span>
-			</span>
-		</div>
-	</section>
+			<div class="progress-bar-container mb-4 shadow-inner">
+				<div class="progress-bar-fill transition-all duration-700 ease-out relative overflow-hidden" style="width: {percentProgress}%;">
+					<div class="absolute inset-0 bg-white/20 w-full animate-[shimmer_2s_infinite]"></div>
+				</div>
+			</div>
+			<div class="flex justify-between text-sm font-bold mt-auto">
+				<span class="text-gray-900 flex items-center gap-1.5">
+					<span class="material-symbols-outlined text-[16px] text-gray-400">group</span>
+					{submittedCount} <span class="text-gray-400 font-medium px-1">of</span> {totalEmployees} <span class="hidden sm:inline font-medium text-gray-400">Employees</span>
+				</span>
+			</div>
+		</section>
+
+		<!-- TEAM ANALYTICS CARD -->
+		<section class="bg-white rounded-2xl p-5 sm:p-6 custom-shadow border border-gray-100/50 transition-transform duration-300 hover:shadow-lg flex flex-col justify-between" data-purpose="team-analytics">
+			<div class="flex items-center justify-between mb-3">
+				<h2 class="text-[10px] sm:text-xs font-bold text-gray-800 tracking-wider uppercase flex items-center gap-2">
+					<span class="material-symbols-outlined text-lg text-gray-400">analytics</span>
+					Team Analytics ({formatDateForDisplay(activeDate)})
+				</h2>
+				<span class="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-md">{totalHours} HOURS LOGGED</span>
+			</div>
+
+			<!-- Analytics stats rows -->
+			<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 my-2">
+				<!-- Wellness breakdown -->
+				<div class="space-y-1.5">
+					<span class="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider block">Wellness status</span>
+					<div class="flex items-center gap-2">
+						<span class="text-xs font-bold text-gray-700 bg-green-50 text-green-700 px-2 py-1 rounded border border-green-100" title="Great Energy">🟢 {wellnessCounts.good}</span>
+						<span class="text-xs font-bold text-gray-700 bg-amber-50 text-amber-700 px-2 py-1 rounded border border-amber-100" title="Tired">🟡 {wellnessCounts.tired}</span>
+						<span class="text-xs font-bold text-gray-700 bg-red-50 text-red-700 px-2 py-1 rounded border border-red-100" title="Blocked">🔴 {wellnessCounts.blocked}</span>
+					</div>
+				</div>
+				<!-- Tasks breakdown summary -->
+				<div class="space-y-1.5">
+					<span class="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider block">Tasks distribution</span>
+					<span class="text-xs font-bold text-gray-800 flex items-center gap-1">
+						<span class="material-symbols-outlined text-sm text-gray-400">task_alt</span>
+						{totalTasks} Total Tasks
+					</span>
+				</div>
+			</div>
+
+			<!-- Stacked progress bar for Task status -->
+			<div class="space-y-1.5 mt-2">
+				<span class="text-[9px] font-bold text-gray-400 uppercase tracking-wider block">Task Status breakdown</span>
+				<div class="h-2 rounded-full overflow-hidden flex bg-gray-100">
+					{#if totalTasks > 0}
+						<div class="bg-green-500 h-full" style="width: {(statusCounts.done / totalTasks) * 100}%" title="Done: {statusCounts.done}"></div>
+						<div class="bg-red-500 h-full" style="width: {(statusCounts.obstacle / totalTasks) * 100}%" title="Obstacle: {statusCounts.obstacle}"></div>
+						<div class="bg-amber-500 h-full" style="width: {(statusCounts.carryOver / totalTasks) * 100}%" title="Carry Over: {statusCounts.carryOver}"></div>
+					{:else}
+						<div class="bg-gray-200 w-full h-full"></div>
+					{/if}
+				</div>
+				<div class="flex items-center gap-3 text-[10px] font-bold text-gray-500">
+					<span class="flex items-center gap-1">
+						<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> Done: {statusCounts.done}
+					</span>
+					<span class="flex items-center gap-1">
+						<span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Obstacle: {statusCounts.obstacle}
+					</span>
+					<span class="flex items-center gap-1">
+						<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span> Carry Over: {statusCounts.carryOver}
+					</span>
+				</div>
+			</div>
+		</section>
+	</div>
 
 	<!-- NOTIFICATION CARDS -->
 	<div class="space-y-4">
@@ -744,6 +840,79 @@
 					</span>
 				</div>
 			</div>
+
+			<!-- Weekly Status Overview Grid -->
+			<div class="bg-white rounded-[24px] custom-shadow border border-gray-100 p-4 sm:p-5">
+				<h3 class="text-xs font-extrabold text-gray-700 uppercase tracking-wider mb-3.5 flex items-center gap-2">
+					<span class="material-symbols-outlined text-lg text-gray-400">grid_view</span>
+					Weekly Status Overview
+				</h3>
+				<div class="overflow-x-auto scrollbar-hide">
+					<table class="w-full min-w-[500px] border-collapse text-left text-xs font-semibold text-gray-500">
+						<thead>
+							<tr class="border-b border-gray-100">
+								<th class="py-2.5 pl-2 text-[10px] uppercase font-bold text-gray-400">Employee</th>
+								{#each weekDays as day}
+									<th class="py-2.5 text-center">
+										<button 
+											type="button" 
+											onclick={() => activeDate = day.dateStr}
+											class="hover:underline font-bold text-[10px] uppercase tracking-wider transition-colors"
+											class:text-black={activeDate === day.dateStr}
+											class:text-gray-400={activeDate !== day.dateStr}
+										>
+											{day.name.substring(0, 3)} ({day.formatted})
+										</button>
+									</th>
+								{/each}
+							</tr>
+						</thead>
+						<tbody class="divide-y divide-gray-100/50">
+							{#each data.employees as employee}
+								<tr>
+									<td class="py-3 pl-2 font-bold text-gray-800 flex items-center gap-2">
+										<div class="w-1.5 h-1.5 rounded-full bg-gray-300"></div>
+										{employee}
+									</td>
+									{#each weekDays as day}
+										{@const report = data.submissions[employee]?.[day.dateStr]}
+										<td class="py-3 text-center">
+											<button
+												type="button"
+												onclick={() => {
+													activeDate = day.dateStr;
+													setTimeout(() => {
+														const el = document.getElementById(`card-${employee}`);
+														if (el) {
+															el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+															el.classList.add('ring-4', 'ring-yellow-400/40', 'border-yellow-400');
+															setTimeout(() => el.classList.remove('ring-4', 'ring-yellow-400/40', 'border-yellow-400'), 2000);
+														}
+													}, 50);
+												}}
+												class="inline-flex items-center justify-center p-1 rounded-full transition-all active:scale-90 hover:bg-gray-100"
+												title={report ? `View ${employee}'s report for ${day.name} (Wellness: ${report.wellness})` : `No report from ${employee} for ${day.name}`}
+											>
+												{#if report}
+													{#if report.wellness === 'Good'}
+														<span class="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center text-[10px] text-white font-bold shadow-sm">✓</span>
+													{:else if report.wellness === 'Tired'}
+														<span class="w-4 h-4 rounded-full bg-amber-500 flex items-center justify-center text-[10px] text-white font-bold shadow-sm">!</span>
+													{:else}
+														<span class="w-4 h-4 rounded-full bg-red-500 flex items-center justify-center text-[10px] text-white font-bold shadow-sm">X</span>
+													{/if}
+												{:else}
+													<span class="w-4 h-4 rounded-full bg-gray-100 border border-gray-200 inline-block shadow-inner"></span>
+												{/if}
+											</button>
+										</td>
+									{/each}
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			</div>
 			
 			<div class="bg-white rounded-[24px] custom-shadow border border-gray-100 p-4 sm:p-5 flex flex-col h-[600px] sm:h-[700px] lg:h-[calc(100vh-200px)] lg:max-h-[900px] relative">
 				
@@ -800,7 +969,7 @@
 						{@const report = data.submissions[employee]?.[activeDate]}
 						<div in:fly={{ y: 20, duration: 400, delay: i * 40 }}>
 							{#if report}
-								<div class="bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all duration-300 hover:border-gray-400 hover:shadow-md group">
+								<div id="card-{employee}" class="bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all duration-300 hover:border-gray-400 hover:shadow-md group">
 									<div class="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4 bg-gray-50 border-b border-gray-100 group-hover:bg-gray-100/50 transition-colors">
 										<div class="flex items-center gap-3">
 											<div class="w-8 h-8 rounded-lg bg-[#1a1a1a] text-white flex items-center justify-center text-sm font-bold shadow-sm">
@@ -883,7 +1052,7 @@
 									</div>
 								</div>
 							{:else}
-								<div class="flex items-center justify-between p-4 sm:p-5 rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 transition-colors hover:bg-gray-50 hover:border-gray-300">
+								<div id="card-{employee}" class="flex items-center justify-between p-4 sm:p-5 rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 transition-colors hover:bg-gray-50 hover:border-gray-300">
 									<div class="flex items-center gap-3 opacity-60">
 										<div class="w-8 h-8 rounded-lg bg-gray-200 text-gray-500 flex items-center justify-center text-sm font-bold">
 											{employee.charAt(0).toUpperCase()}
