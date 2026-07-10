@@ -42,6 +42,17 @@ export function getTodayDateString(): string {
 	return `${yyyy}-${mm}-${dd}`;
 }
 
+export function getYesterdayDateString(): string {
+	const d = new Date();
+	const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+	const jktDate = new Date(utc + 3600000 * 7);
+	jktDate.setDate(jktDate.getDate() - 1);
+	const yyyy = jktDate.getFullYear();
+	const mm = String(jktDate.getMonth() + 1).padStart(2, '0');
+	const dd = String(jktDate.getDate()).padStart(2, '0');
+	return `${yyyy}-${mm}-${dd}`;
+}
+
 // Get Monday of the current week in UTC+7 (Asia/Jakarta)
 export function getMondayDateString(): string {
 	const d = new Date();
@@ -121,7 +132,8 @@ async function saveStore(store: WeeklyStore): Promise<void> {
 export async function appendReportToSheets(
 	employeeName: string,
 	tasks: TaskItem[],
-	wellness: 'Good' | 'Tired' | 'Blocked'
+	wellness: 'Good' | 'Tired' | 'Blocked',
+	targetDate?: string
 ): Promise<void> {
 	try {
 		const spreadsheetId = env.GOOGLE_SPREADSHEET_ID || process.env.GOOGLE_SPREADSHEET_ID;
@@ -161,7 +173,7 @@ export async function appendReportToSheets(
 		});
 
 		const sheets = google.sheets({ version: 'v4', auth });
-		const todayStr = getTodayDateString();
+		const todayStr = targetDate || getTodayDateString();
 
 		// Fetch spreadsheet sheetId for "Erza-Report" or fallback
 		const spreadsheetInfo = await sheets.spreadsheets.get({ spreadsheetId });
@@ -264,16 +276,17 @@ export async function appendReportToSheets(
 export async function saveReport(
 	employeeName: string,
 	tasks: TaskItem[],
-	wellness: 'Good' | 'Tired' | 'Blocked'
+	wellness: 'Good' | 'Tired' | 'Blocked',
+	targetDate?: string
 ): Promise<WeeklyStore> {
 	const store = await getStore();
-	const today = getTodayDateString();
+	const dateStr = targetDate || getTodayDateString();
 
 	if (!store.submissions[employeeName]) {
 		store.submissions[employeeName] = {};
 	}
 
-	store.submissions[employeeName][today] = {
+	store.submissions[employeeName][dateStr] = {
 		employeeName,
 		tasks,
 		submittedAt: new Date().toISOString(),
@@ -283,7 +296,7 @@ export async function saveReport(
 	await saveStore(store);
 
 	// Sync to Sheets
-	appendReportToSheets(employeeName, tasks, wellness).catch((error) => {
+	appendReportToSheets(employeeName, tasks, wellness, dateStr).catch((error) => {
 		console.error('Async error in appendReportToSheets:', error);
 	});
 
@@ -428,17 +441,17 @@ export async function sendObstacleAlert(
 	}
 }
 
-export async function pokePendingEmployees(): Promise<boolean> {
+export async function pokePendingEmployees(targetDate?: string): Promise<boolean> {
 	const webhookUrl = env.DISCORD_WEBHOOK_URL || process.env.DISCORD_WEBHOOK_URL;
 	if (!webhookUrl || webhookUrl.includes('dummy-id') || webhookUrl === '') return false;
 
 	const store = await getStore();
-	const today = getTodayDateString();
+	const dateStr = targetDate || getTodayDateString();
 	const employees = getEmployeesList();
 
 	const pending: string[] = [];
 	for (const name of employees) {
-		if (!store.submissions[name] || !store.submissions[name][today]) {
+		if (!store.submissions[name] || !store.submissions[name][dateStr]) {
 			pending.push(name);
 		}
 	}
@@ -447,8 +460,9 @@ export async function pokePendingEmployees(): Promise<boolean> {
 		return false;
 	}
 
+	const dateFormatted = formatIndonesianDate(dateStr);
 	const payload = {
-		content: `⏰ **DAILY REPORT REMINDER**\n\nHello team, the following members have not submitted their daily reports today:\n${pending.map((name) => `• **${name}**`).join('\n')}\n\nPlease fill it out as soon as possible! Thank you 🙏`
+		content: `⏰ **DAILY REPORT REMINDER**\n\nHello team, the following members have not submitted their daily reports for **${dateFormatted}**:\n${pending.map((name) => `• **${name}**`).join('\n')}\n\nPlease fill it out as soon as possible! Thank you 🙏`
 	};
 
 	try {

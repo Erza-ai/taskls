@@ -9,6 +9,7 @@ import {
 	getEmployeesList,
 	formatIndonesianDate,
 	getTodayDateString,
+	getYesterdayDateString,
 	pokePendingEmployees
 } from '$lib/server/store';
 
@@ -16,13 +17,16 @@ export const load: PageServerLoad = async () => {
 	const store = await getStore();
 	const employees = getEmployeesList();
 	const today = getTodayDateString();
+	const yesterday = getYesterdayDateString();
 
 	return {
 		employees,
 		submissions: store.submissions,
 		discordSent: store.discordSent,
 		todayDate: today,
-		todayDateFormatted: formatIndonesianDate(today)
+		todayDateFormatted: formatIndonesianDate(today),
+		yesterdayDate: yesterday,
+		yesterdayDateFormatted: formatIndonesianDate(yesterday)
 	};
 };
 
@@ -32,6 +36,7 @@ export const actions: Actions = {
 		const employeeName = data.get('employeeName')?.toString().trim();
 		const tasksStr = data.get('tasks')?.toString();
 		const wellness = (data.get('wellness')?.toString() || 'Good') as 'Good' | 'Tired' | 'Blocked';
+		const targetDate = data.get('targetDate')?.toString().trim();
 
 		// Validation
 		if (!employeeName) {
@@ -110,7 +115,7 @@ export const actions: Actions = {
 
 		try {
 			// Save the report
-			await saveReport(employeeName, tasks as any, wellness);
+			await saveReport(employeeName, tasks as any, wellness, targetDate);
 
 			// Check if all employees have submitted today, send webhook asynchronously in background
 			checkAndSendToDiscord().catch((error) => {
@@ -130,9 +135,11 @@ export const actions: Actions = {
 		}
 	},
 
-	pokePending: async () => {
+	pokePending: async ({ request }) => {
+		const data = await request.formData();
+		const targetDate = data.get('targetDate')?.toString().trim();
 		try {
-			const poked = await pokePendingEmployees();
+			const poked = await pokePendingEmployees(targetDate);
 			if (poked) {
 				return {
 					success: true,
@@ -140,7 +147,7 @@ export const actions: Actions = {
 				};
 			} else {
 				return fail(400, {
-					error: 'Failed to send reminder (perhaps all employees have already submitted today).'
+					error: `Failed to send reminder (perhaps all employees have already submitted for ${targetDate || 'today'}).`
 				});
 			}
 		} catch (error) {
