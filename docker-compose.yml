@@ -10,7 +10,7 @@ services:
       # Persists daily submissions JSON database in a named Docker volume
       - taskls-data:/app/data
     environment:
-      - EMPLOYEES=${EMPLOYEES:-Ahmad Fauzi,Budi Santoso,Citra Lestari,Dewi Sartika,Eko Prasetyo}
+      - EMPLOYEES=${EMPLOYEES:-Lisa (PM),Fino (AI),Owen (QA),Aris (BA),Nafi (UI/UX),Atha (FE),Eril (BE)}
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       - AI_BASE_URL=${AI_BASE_URL:-}
       - AI_MODEL=${AI_MODEL:-gpt-4o-mini}

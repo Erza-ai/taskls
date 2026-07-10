@@ -8,7 +8,19 @@ export const GET: RequestHandler = async () => {
 	const DATA_FILE = path.join(DATA_DIR, 'store.json');
 
 	try {
-		const content = await fs.readFile(DATA_FILE, 'utf-8');
+		let content;
+		try {
+			content = await fs.readFile(DATA_FILE, 'utf-8');
+		} catch (err: any) {
+			if (err.code === 'ENOENT') {
+				const defaultStore = { submissions: {}, discordSent: {} };
+				await fs.mkdir(DATA_DIR, { recursive: true });
+				await fs.writeFile(DATA_FILE, JSON.stringify(defaultStore, null, 2), 'utf-8');
+				content = JSON.stringify(defaultStore);
+			} else {
+				throw err;
+			}
+		}
 		const data = JSON.parse(content);
 
 		return json(data, {
