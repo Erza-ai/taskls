@@ -201,7 +201,7 @@
 				}));
 				wellness = draft.wellness || 'Good';
 			} else {
-				const report = data.submissions[employee]?.[dateStr];
+				const report = getSubmission(employee, dateStr);
 				if (report) {
 					tasks = JSON.parse(JSON.stringify(report.tasks)).map((t: any) => ({
 						...t,
@@ -287,7 +287,7 @@
 	// Submissions counts based on active date
 	let activeSubmissionsList = $derived(
 		data.employees
-			.map((emp: string) => data.submissions[emp]?.[activeDate])
+			.map((emp: string) => getSubmission(emp, activeDate))
 			.filter(Boolean)
 	);
 	let submittedCount = $derived(activeSubmissionsList.length);
@@ -329,7 +329,7 @@
 	// Display employees filtered by search query and status tab
 	let displayEmployees = $derived(
 		data.employees.filter((employee: string) => {
-			const report = data.submissions[employee]?.[activeDate];
+			const report = getSubmission(employee, activeDate);
 			
 			// Match Search Box
 			const matchesSearch =
@@ -385,9 +385,24 @@
 		return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
 	}
 
+	function getSubmission(employee: string, dateStr: string) {
+		if (!employee) return undefined;
+		if (data.submissions[employee]?.[dateStr]) {
+			return data.submissions[employee][dateStr];
+		}
+		const cleanEmployee = employee.replace(/\s*\(.*?\)\s*/g, '').trim().toLowerCase();
+		for (const key of Object.keys(data.submissions)) {
+			const cleanKey = key.replace(/\s*\(.*?\)\s*/g, '').trim().toLowerCase();
+			if (cleanKey === cleanEmployee || cleanKey.includes(cleanEmployee) || cleanEmployee.includes(cleanKey)) {
+				return data.submissions[key]?.[dateStr];
+			}
+		}
+		return undefined;
+	}
+
 	let hasUserSubmittedForTargetDate = $derived.by(() => {
 		if (!selectedEmployee) return false;
-		return data.submissions[selectedEmployee]?.[targetDate] !== undefined;
+		return getSubmission(selectedEmployee, targetDate) !== undefined;
 	});
 </script>
 
@@ -575,7 +590,7 @@
 									<Command.Empty class="p-3 text-xs text-gray-400 font-semibold text-center">No employee found.</Command.Empty>
 									<Command.Group>
 										{#each filteredEmployees as employee}
-											{@const hasSubmitted = data.submissions[employee]?.[targetDate] !== undefined}
+											{@const hasSubmitted = getSubmission(employee, targetDate) !== undefined}
 											<Command.Item
 												value={employee}
 												onSelect={() => selectEmployee(employee)}
@@ -875,7 +890,7 @@
 										{employee}
 									</td>
 									{#each weekDays as day}
-										{@const report = data.submissions[employee]?.[day.dateStr]}
+										{@const report = getSubmission(employee, day.dateStr)}
 										<td class="py-3 text-center">
 											<button
 												type="button"
@@ -966,7 +981,7 @@
 				<!-- Submissions List -->
 				<div class="flex-1 overflow-y-auto p-1 space-y-3.5 scrollbar-hide relative z-0">
 					{#each displayEmployees as employee, i (employee)}
-						{@const report = data.submissions[employee]?.[activeDate]}
+						{@const report = getSubmission(employee, activeDate)}
 						<div in:fly={{ y: 20, duration: 400, delay: i * 40 }}>
 							{#if report}
 								<div id="card-{employee}" class="bg-white border border-gray-200 rounded-2xl overflow-hidden transition-all duration-300 hover:border-gray-400 hover:shadow-md group">
