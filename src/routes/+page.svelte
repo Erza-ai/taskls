@@ -174,7 +174,7 @@
 	// Track the last employee & date we loaded data for — prevents re-running on polling refresh
 	let lastLoadedKey = $state('');
 
-	// Auto-load existing report data only when the selected employee or date CHANGES
+	// Auto-load existing report data or local draft only when the selected employee or date CHANGES
 	$effect(() => {
 		const employee = selectedEmployee; // track reactive dependency
 		const dateStr = targetDate;       // track reactive dependency
@@ -184,17 +184,35 @@
 		lastLoadedKey = currentKey;
 
 		if (employee) {
-			const report = data.submissions[employee]?.[dateStr];
-			if (report) {
-				tasks = JSON.parse(JSON.stringify(report.tasks)).map((t: any) => ({
+			// Check local storage draft first
+			const draftStr = localStorage.getItem(`taskls_draft_${employee}_${dateStr}`);
+			let draft = null;
+			if (draftStr) {
+				try {
+					draft = JSON.parse(draftStr);
+				} catch (e) {}
+			}
+
+			if (draft && draft.tasks && draft.tasks.length > 0) {
+				tasks = draft.tasks.map((t: any) => ({
 					...t,
 					notes: t.notes || '',
 					attachment: t.attachment || ''
 				}));
-				wellness = report.wellness || 'Good';
+				wellness = draft.wellness || 'Good';
 			} else {
-				tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' }];
-				wellness = 'Good';
+				const report = data.submissions[employee]?.[dateStr];
+				if (report) {
+					tasks = JSON.parse(JSON.stringify(report.tasks)).map((t: any) => ({
+						...t,
+						notes: t.notes || '',
+						attachment: t.attachment || ''
+					}));
+					wellness = report.wellness || 'Good';
+				} else {
+					tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' }];
+					wellness = 'Good';
+				}
 			}
 		} else {
 			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' }];
@@ -202,8 +220,29 @@
 		}
 	});
 
+	// Auto-save draft changes to localStorage
+	$effect(() => {
+		const employee = selectedEmployee;
+		const dateStr = targetDate;
+		if (employee && dateStr) {
+			const hasContent = tasks.some((t) => t.text.trim() !== '');
+			if (hasContent) {
+				const draftData = {
+					tasks: $state.snapshot(tasks),
+					wellness
+				};
+				localStorage.setItem(`taskls_draft_${employee}_${dateStr}`, JSON.stringify(draftData));
+			} else {
+				localStorage.removeItem(`taskls_draft_${employee}_${dateStr}`);
+			}
+		}
+	});
+
 	$effect(() => {
 		if (form?.success) {
+			if (selectedEmployee && targetDate) {
+				localStorage.removeItem(`taskls_draft_${selectedEmployee}_${targetDate}`);
+			}
 			tasks = [{ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' }];
 			selectedEmployee = '';
 			lastLoadedKey = ''; // reset guard so the same employee can reload fresh data next time
