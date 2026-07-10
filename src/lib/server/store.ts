@@ -743,6 +743,64 @@ export function formatIndonesianDate(dateStr: string): string {
 	return `${dayName}, ${parseInt(day, 10)} ${months[monthIdx]} ${year}`;
 }
 
+
+function normalizeDateStr(rawDateStr: string): string {
+	if (!rawDateStr) return '';
+	const trimmed = rawDateStr.trim();
+	
+	// If already in YYYY-MM-DD format, return it
+	if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+		return trimmed;
+	}
+
+	// Try to match DD/MM/YYYY or MM/DD/YYYY
+	const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+	if (slashMatch) {
+		const part1 = parseInt(slashMatch[1], 10);
+		const part2 = parseInt(slashMatch[2], 10);
+		const year = parseInt(slashMatch[3], 10);
+
+		let month = part2;
+		let day = part1;
+
+		if (part1 === 7 && part2 !== 7) {
+			// Likely MM/DD/YYYY (July is month 7)
+			month = part1;
+			day = part2;
+		} else if (part2 === 7 && part1 !== 7) {
+			// Likely DD/MM/YYYY (July is month 7)
+			month = part2;
+			day = part1;
+		} else if (part2 > 12) {
+			// Month cannot be > 12, so part1 is month
+			month = part1;
+			day = part2;
+		} else {
+			// Default to Indonesian standard DD/MM/YYYY
+			month = part2;
+			day = part1;
+		}
+
+		const mm = String(month).padStart(2, '0');
+		const dd = String(day).padStart(2, '0');
+		return `${year}-${mm}-${dd}`;
+	}
+
+	// Try standard JS Date parsing fallback
+	try {
+		const d = new Date(trimmed);
+		if (!isNaN(d.getTime())) {
+			const yyyy = d.getFullYear();
+			const mm = String(d.getMonth() + 1).padStart(2, '0');
+			const dd = String(d.getDate()).padStart(2, '0');
+			return `${yyyy}-${mm}-${dd}`;
+		}
+	} catch (e) {}
+
+	return trimmed;
+}
+
+// Reconstruct the store object
 export async function importFromSheets(): Promise<{ success: boolean; count: number; message: string }> {
 	const spreadsheetId = env.GOOGLE_SPREADSHEET_ID || process.env.GOOGLE_SPREADSHEET_ID;
 	if (!spreadsheetId) {
@@ -797,7 +855,6 @@ export async function importFromSheets(): Promise<{ success: boolean; count: num
 		return { success: true, count: 0, message: 'Google Sheet is empty.' };
 	}
 
-	// Reconstruct the store object
 	const store = await getStore();
 	store.submissions = {};
 
@@ -808,7 +865,8 @@ export async function importFromSheets(): Promise<{ success: boolean; count: num
 		if (!row || row.length < 3) continue;
 
 		const timestamp = row[0] || new Date().toISOString();
-		const dateStr = row[1];
+		const rawDateStr = row[1];
+		const dateStr = normalizeDateStr(rawDateStr);
 		const employeeName = row[2];
 		const project = row[3] || 'General';
 		const taskText = row[4];
