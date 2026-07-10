@@ -36,7 +36,7 @@
 	let statusFilter = $state('All');
 
 	function addTask() {
-		tasks.push({ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' });
+		tasks.unshift({ text: '', status: 'Done', hours: 1, priority: 'Medium', project: '', notes: '', attachment: '' });
 	}
 
 	function removeTask(index: number) {
@@ -565,7 +565,7 @@
 							<div in:slide={{ duration: 300 }} class="bg-gray-50/80 rounded-2xl p-4 sm:p-5 border border-gray-200 space-y-4 relative group transition-all duration-200 hover:border-gray-300 hover:bg-gray-50">
 								<div class="flex justify-between items-center">
 									<h4 class="text-xs sm:text-sm font-bold text-gray-600 bg-white px-3 py-1 rounded-full border border-gray-200 shadow-sm">
-										Task {index + 1}
+										Task {tasks.length - index}
 									</h4>
 									{#if tasks.length > 1}
 										<button type="button" onclick={() => removeTask(index)} class="text-gray-400 hover:text-red-500 bg-white hover:bg-red-50 rounded-full p-1.5 transition-colors border border-gray-200 hover:border-red-200 shadow-sm" title="Remove Task">
