@@ -395,16 +395,14 @@ export async function generateAISummary(store: WeeklyStore, targetDate?: string)
 				const tasksFormatted = report.tasks
 					.map((t) => `- [${t.status}] [Project: ${t.project || 'General'}] [Priority: ${t.priority || 'Medium'}] ${t.text.trim()} (Duration: ${t.hours || 1} hours)`)
 					.join('\n  ');
-				let details = `- **${name}**:\n  ${tasksFormatted}`;
-				if (report.notes) details += `\n  Notes: ${report.notes}`;
-				return details;
+				return `- **${name}**:\n  ${tasksFormatted}`;
 			}
 			return `- **${name}**: Has not submitted daily report.`;
 		})
 		.join('\n\n');
 
 	const prompt = `You are a project manager assistant summarizing the Daily Task Reports of a development team.
-Here is the list of daily tasks of the employees on ${formatIndonesianDate(today)}:
+Here is the list of daily tasks of the employees on ${formatIndonesianDate(dateStr)}:
 
 ${reportList}
 
@@ -925,6 +923,7 @@ export async function importFromSheets(): Promise<{ success: boolean; count: num
 
 		if (!store.submissions[employeeName][dateStr]) {
 			store.submissions[employeeName][dateStr] = {
+				employeeName,
 				tasks: [],
 				wellness,
 				submittedAt: new Date().toISOString()
