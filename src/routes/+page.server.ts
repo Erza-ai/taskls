@@ -57,7 +57,15 @@ export const actions: Actions = {
 			});
 		}
 
-		let tasks: Array<{ text: string; status: 'Done' | 'Obstacle' | 'Carry Over'; hours: number; priority: 'Low' | 'Medium' | 'High'; project: string }> = [];
+		let tasks: Array<{
+			text: string;
+			status: 'Done' | 'Obstacle' | 'Carry Over' | 'Hold';
+			hours: number;
+			priority: 'Low' | 'Medium' | 'High';
+			project: string;
+			notes?: string;
+			attachment?: string;
+		}> = [];
 		try {
 			if (tasksStr) {
 				tasks = JSON.parse(tasksStr);
@@ -76,7 +84,7 @@ export const actions: Actions = {
 			});
 		}
 
-		const validStatuses = ['Done', 'Obstacle', 'Carry Over'];
+		const validStatuses = ['Done', 'Obstacle', 'Carry Over', 'Hold'];
 		const validPriorities = ['Low', 'Medium', 'High'];
 		for (let i = 0; i < tasks.length; i++) {
 			const item = tasks[i];
