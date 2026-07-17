@@ -18,6 +18,7 @@ services:
       - GOOGLE_SPREADSHEET_ID=${GOOGLE_SPREADSHEET_ID:-}
       - GOOGLE_SERVICE_ACCOUNT_KEY=${GOOGLE_SERVICE_ACCOUNT_KEY:-}
       - NODE_ENV=${APP_ENV:-production}
+      - TASKLS_API_KEY=${TASKLS_API_KEY:-your-secret-key}
     restart: unless-stopped
 
 volumes:
