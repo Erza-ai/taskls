@@ -1,7 +1,5 @@
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import fs from 'fs/promises';
-import path from 'path';
 import {
 	getStore,
 	saveReport,
@@ -186,13 +184,7 @@ export const actions: Actions = {
 				return fail(400, { error: 'Invalid backup file format.' });
 			}
 
-			// Write to the store file
-			const DATA_DIR = path.resolve('data');
-			const DATA_FILE = path.join(DATA_DIR, 'store.json');
-			
-			// Ensure directory exists
-			await fs.mkdir(DATA_DIR, { recursive: true });
-			await fs.writeFile(DATA_FILE, JSON.stringify(parsed, null, 2), 'utf-8');
+			await saveStore(parsed);
 
 			return {
 				success: true,

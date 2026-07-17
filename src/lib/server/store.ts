@@ -3,6 +3,7 @@ import path from 'path';
 import { env } from '$env/dynamic/private';
 import OpenAI from 'openai';
 import { google } from 'googleapis';
+import { getMongoDatabase } from '$lib/server/mongodb';
 
 export interface TaskItem {
 	text: string;
@@ -29,8 +30,10 @@ export interface WeeklyStore {
 	weeklyDiscordSent: boolean;
 }
 
-const DATA_DIR = path.resolve('data');
-const DATA_FILE = path.join(DATA_DIR, 'submissions.json');
+const STORE_COLLECTION = 'app_state';
+const STORE_DOCUMENT_ID = 'weekly-store';
+
+type WeeklyStoreDocument = WeeklyStore & { _id: string };
 
 // Get current date in UTC+7 (Asia/Jakarta)
 export function getTodayDateString(): string {
@@ -84,29 +87,28 @@ export function isPastFriday6PM(): boolean {
 
 export async function getStore(): Promise<WeeklyStore> {
 	const monday = getMondayDateString();
-	let store: WeeklyStore;
-	try {
-		await fs.mkdir(DATA_DIR, { recursive: true });
-		const data = await fs.readFile(DATA_FILE, 'utf-8');
-		store = JSON.parse(data);
+	const database = await getMongoDatabase();
+	const collection = database.collection<WeeklyStoreDocument>(STORE_COLLECTION);
+	const document = await collection.findOne({ _id: STORE_DOCUMENT_ID });
 
-		// Reset if it's a new week
-		if (store.weekStartDate !== monday) {
-			store = {
-				weekStartDate: monday,
-				submissions: {},
-				discordSent: {},
-				weeklyDiscordSent: false
-			};
-			await saveStore(store);
-		}
-	} catch (error) {
+	let store: WeeklyStore;
+	if (document) {
+		const { _id: _ignored, ...storedData } = document;
+		store = storedData;
+	} else {
 		store = {
 			weekStartDate: monday,
 			submissions: {},
 			discordSent: {},
 			weeklyDiscordSent: false
 		};
+		await saveStore(store);
+	}
+
+	// Start a new weekly notification cycle without deleting historical reports.
+	if (store.weekStartDate !== monday) {
+		store.weekStartDate = monday;
+		store.weeklyDiscordSent = false;
 		await saveStore(store);
 	}
 
@@ -126,8 +128,23 @@ export async function getStore(): Promise<WeeklyStore> {
 }
 
 export async function saveStore(store: WeeklyStore): Promise<void> {
-	await fs.mkdir(DATA_DIR, { recursive: true });
-	await fs.writeFile(DATA_FILE, JSON.stringify(store, null, 2), 'utf-8');
+	const database = await getMongoDatabase();
+	const collection = database.collection<WeeklyStoreDocument>(STORE_COLLECTION);
+	await collection.replaceOne(
+		{ _id: STORE_DOCUMENT_ID },
+		store,
+		{ upsert: true }
+	);
+}
+
+async function updateStoreField(fieldPath: string, value: unknown): Promise<void> {
+	const database = await getMongoDatabase();
+	const collection = database.collection<WeeklyStoreDocument>(STORE_COLLECTION);
+	await collection.updateOne(
+		{ _id: STORE_DOCUMENT_ID },
+		{ $set: { [fieldPath]: value } },
+		{ upsert: true }
+	);
 }
 
 export async function appendReportToSheets(
@@ -293,15 +310,17 @@ export async function saveReport(
 		console.error('Failed to generate AI summary on submission:', err);
 	}
 
-	store.submissions[employeeName][dateStr] = {
+	const report: TaskReport = {
 		employeeName,
 		tasks,
 		submittedAt: new Date().toISOString(),
 		wellness,
 		aiSummary
 	};
+	store.submissions[employeeName][dateStr] = report;
 
-	await saveStore(store);
+	// Update only this employee/date so simultaneous submissions cannot overwrite each other.
+	await updateStoreField(`submissions.${employeeName}.${dateStr}`, report);
 
 	// Sync to Sheets
 	appendReportToSheets(employeeName, tasks, wellness, dateStr).catch((error) => {
@@ -746,7 +765,7 @@ export async function checkAndSendToDiscord(targetDate?: string): Promise<{ sent
 	const success = await sendDiscordWebhook(store, dateStr);
 	if (success) {
 		store.discordSent[dateStr] = true;
-		await saveStore(store);
+		await updateStoreField(`discordSent.${dateStr}`, true);
 		return { sent: true, message: 'Report successfully sent to Discord!' };
 	} else {
 		return { sent: false, message: 'Failed to send report to Discord. Please check server logs.' };
